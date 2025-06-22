@@ -1,6 +1,7 @@
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
-from keep_alive import keep_alive
+keep_alive()
 import re
 import asyncio
 import os
