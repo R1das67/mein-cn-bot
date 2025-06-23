@@ -109,7 +109,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# --- Timeout beim Löschen von Rollen ---
+# --- Rollen löschen: User kicken statt timeout ---
 @bot.event
 async def on_guild_role_delete(role):
     global delete_timeout_active
@@ -132,9 +132,16 @@ async def on_guild_role_delete(role):
         print(f"Löschung der Rolle {role.name} von {user} geblockt (Timeout aktiv).")
         return
 
-    # Timeout starten
     delete_timeout_active = True
-    print(f"Timeout 1h gestartet wegen Rollen-Löschung durch {user}.")
+    print(f"User {user} wird gekickt wegen Rollen-Löschung.")
+
+    try:
+        member = guild.get_member(user.id)
+        if member:
+            await member.kick(reason="Rolle gelöscht ohne Erlaubnis")
+            print(f"User {user} gekickt.")
+    except Exception as e:
+        print(f"Fehler beim Kick von {user}: {e}")
 
     async def reset_timeout():
         global delete_timeout_active
@@ -144,7 +151,7 @@ async def on_guild_role_delete(role):
 
     bot.loop.create_task(reset_timeout())
 
-# --- Timeout beim Löschen von Kanälen ---
+# --- Kanal löschen: User kicken statt timeout ---
 @bot.event
 async def on_guild_channel_delete(channel):
     global delete_timeout_active
@@ -167,9 +174,16 @@ async def on_guild_channel_delete(channel):
         print(f"Löschung des Kanals {channel.name} von {user} geblockt (Timeout aktiv).")
         return
 
-    # Timeout starten
     delete_timeout_active = True
-    print(f"Timeout 1h gestartet wegen Kanal-Löschung durch {user}.")
+    print(f"User {user} wird gekickt wegen Kanal-Löschung.")
+
+    try:
+        member = guild.get_member(user.id)
+        if member:
+            await member.kick(reason="Kanal gelöscht ohne Erlaubnis")
+            print(f"User {user} gekickt.")
+    except Exception as e:
+        print(f"Fehler beim Kick von {user}: {e}")
 
     async def reset_timeout():
         global delete_timeout_active
