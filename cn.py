@@ -1,10 +1,11 @@
 from keep_alive import keep_alive
 import discord
 from discord.ext import commands
-keep_alive()
 import re
 import asyncio
 import os
+
+keep_alive()
 
 TOKEN = os.getenv('DISCORD_TOKEN') or 'DeinTokenHier'
 
@@ -34,34 +35,55 @@ invite_violations = {}
 # Timeout für User (user_id: timestamp bis wann)
 user_timeouts = {}
 
+# Webhook-Verstöße pro User (user_id: count)
+webhook_violations = {}
+
 invite_pattern = re.compile(r"(https?:\/\/)?(www\.)?(discord\.gg|discordapp\.com\/invite)\/\w+", re.I)
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} ist online!')
 
-# --- Webhook direkt löschen, wenn nicht whitelist ---
+# --- Reset Rules Funktion für User nach 2. Webhook-Verstoß ---
+async def reset_rules_for_user(user, guild):
+    print(f"Reset rules für User {user} in Guild {guild.name} ({guild.id})")
+    member = guild.get_member(user.id)
+    if member:
+        try:
+            roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
+            await member.remove_roles(*roles_to_remove, reason="Reset rules nach 2. Webhook-Verstoß")
+            print(f"Alle Rollen von {user} entfernt.")
+            # Hier kannst du weitere Aktionen ergänzen (Timeout, Kick etc.)
+        except Exception as e:
+            print(f"Fehler bei Reset rules für {user}: {e}")
+    else:
+        print(f"Mitglied {user} nicht gefunden in Guild {guild.name}")
+
+# --- Webhook direkt löschen, wenn nicht whitelist + 2-Versuche Reset ---
 @bot.event
 async def on_webhook_update(channel):
     try:
         webhooks = await channel.webhooks()
         for webhook in webhooks:
             if webhook.id not in WEBHOOK_WHITELIST:
-                # Auditlog für User, der Webhook erstellt hat
                 guild = channel.guild
+                user = None
                 async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
                     if entry.target.id == webhook.id:
                         user = entry.user
                         break
-                else:
-                    user = None
-
+                
                 await webhook.delete(reason="Anti-Webhook - nicht auf Whitelist")
                 print(f"Webhook {webhook.name} gelöscht.")
 
-                if user and user.id not in USER_WHITELIST:
-                    # Optional: zähle Verstöße für Webhook-Erstellung? (kann man ergänzen)
-                    print(f"Webhook erstellt von {user}, gelöscht.")
+                if user:
+                    count = webhook_violations.get(user.id, 0) + 1
+                    webhook_violations[user.id] = count
+                    print(f"Webhook-Verstoß #{count} von {user}")
+
+                    if count == 2:
+                        await reset_rules_for_user(user, guild)
+
     except Exception as e:
         print(f"Fehler bei Webhook Update: {e}")
 
