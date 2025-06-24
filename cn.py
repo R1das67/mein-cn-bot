@@ -61,7 +61,7 @@ async def reset_rules_for_user(user, guild):
 
 # --- Webhook direkt löschen, wenn nicht whitelist + 2-Versuche Reset ---
 @bot.event
-async def on_webhook_update(channel):
+async def on_webhooks_update(channel):
     try:
         webhooks = await channel.webhooks()
         for webhook in webhooks:
