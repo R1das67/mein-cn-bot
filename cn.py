@@ -93,13 +93,8 @@ async def on_webhooks_update(channel):
 
 @bot.event
 async def on_message(message):
-    if message.author.bot and not is_whitelisted(message.author.id):
-        try:
-            await message.delete()
-            print(f"🤖 Nachricht von fremdem Bot gelöscht: {message.author}")
-        except:
-            pass
-        return
+    # WICHTIG: Entfernt den Block, der Nachrichten von fremden Bots gelöscht hat,
+    # damit andere Bots ihre Befehle und Nachrichten normal nutzen können.
 
     if is_whitelisted(message.author.id):
         await bot.process_commands(message)
