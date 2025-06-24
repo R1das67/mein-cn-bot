@@ -4,7 +4,7 @@ from discord.ext import commands
 import re
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timezone  # timezone hier ergänzt
 
 keep_alive()
 
@@ -100,7 +100,7 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    now_ts = datetime.utcnow().timestamp()
+    now_ts = datetime.now(timezone.utc).timestamp()  # hier aktualisiert
 
     if message.author.id in user_timeouts:
         if user_timeouts[message.author.id] > now_ts:
