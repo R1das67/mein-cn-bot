@@ -4,6 +4,7 @@ from discord.ext import commands
 import re
 import asyncio
 import os
+from datetime import datetime
 
 keep_alive()
 
@@ -17,202 +18,179 @@ intents.webhooks = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Whitelist (IDs als int)
-WEBHOOK_WHITELIST = {843180408152784936,662596869221908480,1159469934989025290,830212609961754654,1206001825556471820}
-INVITE_WHITELIST = {843180408152784936,662596869221908480,1159469934989025290,830212609961754654,1206001825556471820}
-ROLE_WHITELIST = {843180408152784936,662596869221908480,1159469934989025290,830212609961754654,1206001825556471820}
-CHANNEL_WHITELIST = {843180408152784936,662596869221908480,1159469934989025290,830212609961754654,1206001825556471820}
-USER_WHITELIST = {843180408152784936,662596869221908480,1159469934989025290,830212609961754654,1206001825556471820}
+# Whitelist-IDs (Admins, Bots etc.)
+WHITELIST = {
+    843180408152784936, 662596869221908480,
+    1159469934989025290, 830212609961754654,
+    1206001825556471820
+}
 
-DELETE_TIMEOUT = 3600  # 1 Stunde Timeout in Sekunden
-
-# State für Timeout bei Kanal/Rollen löschen
-delete_timeout_active = False
-
-# Invite-Verstöße pro User (user_id: count)
-invite_violations = {}
-
-# Timeout für User (user_id: timestamp bis wann)
-user_timeouts = {}
-
-# Webhook-Verstöße pro User (user_id: count)
-webhook_violations = {}
-
+DELETE_TIMEOUT = 3600  # 1 Stunde in Sekunden
 invite_pattern = re.compile(r"(https?:\/\/)?(www\.)?(discord\.gg|discordapp\.com\/invite)\/\w+", re.I)
 
+invite_violations = {}
+user_timeouts = {}
+webhook_violations = {}
+delete_timeout_active = False
+
+# --- BOT START ---
 @bot.event
 async def on_ready():
-    print(f'{bot.user} ist online!')
+    print(f'✅ {bot.user} ist online!')
 
-# --- Reset Rules Funktion für User nach 2. Webhook-Verstoß ---
-async def reset_rules_for_user(user, guild):
-    print(f"Reset rules für User {user} in Guild {guild.name} ({guild.id})")
-    member = guild.get_member(user.id)
-    if member:
-        try:
-            roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
-            await member.remove_roles(*roles_to_remove, reason="Reset rules nach 2. Webhook-Verstoß")
-            print(f"Alle Rollen von {user} entfernt.")
-            # Hier kannst du weitere Aktionen ergänzen (Timeout, Kick etc.)
-        except Exception as e:
-            print(f"Fehler bei Reset rules für {user}: {e}")
-    else:
-        print(f"Mitglied {user} nicht gefunden in Guild {guild.name}")
-
-# --- Webhook direkt löschen, wenn nicht whitelist + 2-Versuche Reset ---
-@bot.event
-async def on_webhooks_update(channel):
-    try:
-        webhooks = await channel.webhooks()
-        for webhook in webhooks:
-            if webhook.id not in WEBHOOK_WHITELIST:
-                guild = channel.guild
-                user = None
-                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
-                    if entry.target.id == webhook.id:
-                        user = entry.user
-                        break
-                
-                await webhook.delete(reason="Anti-Webhook - nicht auf Whitelist")
-                print(f"Webhook {webhook.name} gelöscht.")
-
-                if user:
-                    count = webhook_violations.get(user.id, 0) + 1
-                    webhook_violations[user.id] = count
-                    print(f"Webhook-Verstoß #{count} von {user}")
-
-                    if count == 2:
-                        await reset_rules_for_user(user, guild)
-
-    except Exception as e:
-        print(f"Fehler bei Webhook Update: {e}")
-
-# --- Invite-Link Kontrolle ---
+# --- Invite-Link Kontrolle inkl. Bots ---
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
+    if message.author.id in WHITELIST:
+        return await bot.process_commands(message)
 
-    if message.author.id in USER_WHITELIST:
-        await bot.process_commands(message)
-        return
+    if invite_pattern.search(message.content):
+        try:
+            await message.delete()
+            print(f"🚫 Invite-Link gelöscht von {message.author} ({message.author.id})")
+        except Exception as e:
+            print(f"❌ Fehler beim Löschen des Links: {e}")
 
-    # Timeout prüfen
+        if message.author.bot:
+            print(f"🤖 Bot {message.author} hat Invite gepostet – gelöscht.")
+            return
+
+        count = invite_violations.get(message.author.id, 0) + 1
+        invite_violations[message.author.id] = count
+
+        if count >= 3:
+            try:
+                await message.author.timeout(
+                    duration=DELETE_TIMEOUT,
+                    reason="🔇 3x Invite gepostet"
+                )
+                user_timeouts[message.author.id] = datetime.utcnow().timestamp() + DELETE_TIMEOUT
+                print(f"⏱ {message.author} wurde für 1 Stunde getimeoutet.")
+            except Exception as e:
+                print(f"❌ Timeout fehlgeschlagen: {e}")
+
+    # Prüfe laufende Timeouts
     if message.author.id in user_timeouts:
-        from datetime import datetime
         if user_timeouts[message.author.id] > datetime.utcnow().timestamp():
             try:
                 await message.delete()
-                print(f"Nachricht von getimtem User {message.author} gelöscht.")
+                print(f"🕒 Nachricht von getimeten User {message.author} gelöscht.")
             except:
                 pass
             return
         else:
             del user_timeouts[message.author.id]
 
-    if invite_pattern.search(message.content):
-        try:
-            await message.delete()
-            print(f"Invite-Link von {message.author} gelöscht.")
-        except Exception as e:
-            print(f"Fehler beim Löschen der Nachricht: {e}")
-
-        # Zähle Verstöße
-        count = invite_violations.get(message.author.id, 0) + 1
-        invite_violations[message.author.id] = count
-        if count >= 3:
-            # Timeout User 1h
-            try:
-                await message.author.timeout(duration=DELETE_TIMEOUT, reason="3x Einladungslink gepostet")
-                print(f"User {message.author} für 1h getimeoutet wegen 3x Invite-Verstoß.")
-                user_timeouts[message.author.id] = (discord.utils.utcnow().timestamp() + DELETE_TIMEOUT)
-            except Exception as e:
-                print(f"Fehler beim Timeout setzen: {e}")
-
     await bot.process_commands(message)
 
-# --- Rollen löschen: User kicken statt timeout ---
+# --- Webhook Schutz ---
 @bot.event
-async def on_guild_role_delete(role):
-    global delete_timeout_active
+async def on_webhooks_update(channel):
+    try:
+        webhooks = await channel.webhooks()
+        for webhook in webhooks:
+            if webhook.user and webhook.user.id not in WHITELIST:
+                guild = channel.guild
+                user = None
+                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
+                    if entry.target.id == webhook.id:
+                        user = entry.user
+                        break
 
-    if role.id in ROLE_WHITELIST:
+                await webhook.delete(reason="❌ Webhook nicht erlaubt")
+                print(f"🧹 Webhook {webhook.name} gelöscht.")
+
+                if user:
+                    count = webhook_violations.get(user.id, 0) + 1
+                    webhook_violations[user.id] = count
+                    print(f"⚠ Webhook-Verstoß #{count} von {user}")
+
+                    if count >= 2:
+                        await reset_user_roles(user, guild)
+
+    except Exception as e:
+        print(f"❌ Fehler bei Webhook-Kontrolle: {e}")
+
+# --- Rollenentzug nach Webhook-Verstoß ---
+async def reset_user_roles(user, guild):
+    member = guild.get_member(user.id)
+    if not member:
+        print(f"⚠ User {user} nicht gefunden.")
         return
-
-    guild = role.guild
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_delete):
-        if entry.target.id == role.id:
-            user = entry.user
-            break
-    else:
-        user = None
-
-    if user is None or user.id in USER_WHITELIST:
-        return
-
-    if delete_timeout_active:
-        print(f"Löschung der Rolle {role.name} von {user} geblockt (Timeout aktiv).")
-        return
-
-    delete_timeout_active = True
-    print(f"User {user} wird gekickt wegen Rollen-Löschung.")
 
     try:
-        member = guild.get_member(user.id)
-        if member:
-            await member.kick(reason="Rolle gelöscht ohne Erlaubnis")
-            print(f"User {user} gekickt.")
+        roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
+        await member.remove_roles(*roles_to_remove, reason="🚫 Webhook-Verstoß")
+        print(f"🔁 Rollen von {user} entfernt.")
     except Exception as e:
-        print(f"Fehler beim Kick von {user}: {e}")
+        print(f"❌ Fehler beim Entfernen der Rollen: {e}")
 
-    async def reset_timeout():
-        global delete_timeout_active
-        await asyncio.sleep(DELETE_TIMEOUT)
-        delete_timeout_active = False
-        print("Timeout für Rollen/Kanäle beendet.")
-
-    bot.loop.create_task(reset_timeout())
-
-# --- Kanal löschen: User kicken statt timeout ---
+# --- Kanal löschen ---
 @bot.event
 async def on_guild_channel_delete(channel):
     global delete_timeout_active
-
-    if channel.id in CHANNEL_WHITELIST:
-        return
-
     guild = channel.guild
+
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
         if entry.target.id == channel.id:
             user = entry.user
             break
     else:
-        user = None
+        return
 
-    if user is None or user.id in USER_WHITELIST:
+    if not user or user.id in WHITELIST:
         return
 
     if delete_timeout_active:
-        print(f"Löschung des Kanals {channel.name} von {user} geblockt (Timeout aktiv).")
+        print(f"⏳ Timeout aktiv – kein Kick für {user}")
         return
 
     delete_timeout_active = True
-    print(f"User {user} wird gekickt wegen Kanal-Löschung.")
+    member = guild.get_member(user.id)
 
-    try:
-        member = guild.get_member(user.id)
-        if member:
-            await member.kick(reason="Kanal gelöscht ohne Erlaubnis")
-            print(f"User {user} gekickt.")
-    except Exception as e:
-        print(f"Fehler beim Kick von {user}: {e}")
+    if member:
+        try:
+            await member.kick(reason="🧨 Kanal gelöscht ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Kanal gelöscht).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
 
-    async def reset_timeout():
-        global delete_timeout_active
-        await asyncio.sleep(DELETE_TIMEOUT)
-        delete_timeout_active = False
-        print("Timeout für Rollen/Kanäle beendet.")
+    await asyncio.sleep(DELETE_TIMEOUT)
+    delete_timeout_active = False
+    print("✅ Timeout für Kanal-Kick aufgehoben.")
 
-    bot.loop.create_task(reset_timeout())
+# --- Rolle löschen ---
+@bot.event
+async def on_guild_role_delete(role):
+    global delete_timeout_active
+    guild = role.guild
+
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_delete):
+        if entry.target.id == role.id:
+            user = entry.user
+            break
+    else:
+        return
+
+    if not user or user.id in WHITELIST:
+        return
+
+    if delete_timeout_active:
+        print(f"⏳ Timeout aktiv – kein Kick für {user}")
+        return
+
+    delete_timeout_active = True
+    member = guild.get_member(user.id)
+
+    if member:
+        try:
+            await member.kick(reason="🧨 Rolle gelöscht ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Rolle gelöscht).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
+
+    await asyncio.sleep(DELETE_TIMEOUT)
+    delete_timeout_active = False
+    print("✅ Timeout für Rollen-Kick aufgehoben.")
 
 bot.run(TOKEN)
