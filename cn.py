@@ -4,6 +4,7 @@ from discord.ext import commands
 import re
 import asyncio
 import os
+from datetime import datetime
 
 keep_alive()
 
@@ -53,30 +54,40 @@ async def reset_rules_for_user(user, guild):
 
 
 @bot.event
-async def on_webhook_update(channel):
+async def on_webhooks_update(channel):
+    print(f"🔄 Webhook Update erkannt in {channel.name}")
+    await asyncio.sleep(3)  # Audit Logs brauchen etwas Zeit
+
     try:
         webhooks = await channel.webhooks()
         for webhook in webhooks:
-            if webhook.user and not is_whitelisted(webhook.user.id):
-                guild = channel.guild
-                user = None
-                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.webhook_create):
-                    if entry.target.id == webhook.id:
-                        user = entry.user
-                        break
+            print(f"🧷 Webhook gefunden: {webhook.name} ({webhook.id})")
 
-                await webhook.delete(reason="❌ Webhook nicht erlaubt")
-                print(f"🧹 Webhook {webhook.name} gelöscht.")
+            if webhook.user and is_whitelisted(webhook.user.id):
+                print(f"✅ Whitelisted: {webhook.user}")
+                continue
 
-                if user:
-                    count = webhook_violations.get(user.id, 0) + 1
-                    webhook_violations[user.id] = count
-                    print(f"⚠ Webhook-Verstoß #{count} von {user}")
+            user = None
+            async for entry in channel.guild.audit_logs(limit=10, action=discord.AuditLogAction.webhook_create):
+                if entry.target and entry.target.id == webhook.id:
+                    user = entry.user
+                    break
 
-                    if count >= 2:
-                        await reset_rules_for_user(user, guild)
+            await webhook.delete(reason="🔒 Unautorisierter Webhook")
+            print(f"❌ Webhook {webhook.name} gelöscht")
+
+            if user and not is_whitelisted(user.id):
+                count = webhook_violations.get(user.id, 0) + 1
+                webhook_violations[user.id] = count
+                print(f"⚠ Webhook-Verstoß #{count} von {user}")
+
+                if count >= 2:
+                    await reset_rules_for_user(user, channel.guild)
+
     except Exception as e:
-        print(f"❌ Fehler bei Webhook Update: {e}")
+        print("❌ Fehler bei Webhook Handling:")
+        import traceback
+        traceback.print_exc()
 
 
 @bot.event
@@ -93,9 +104,10 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    from datetime import datetime
+    now_ts = datetime.utcnow().timestamp()
+
     if message.author.id in user_timeouts:
-        if user_timeouts[message.author.id] > datetime.utcnow().timestamp():
+        if user_timeouts[message.author.id] > now_ts:
             try:
                 await message.delete()
                 print(f"🚫 Nachricht von getimtem User {message.author} gelöscht.")
@@ -114,11 +126,12 @@ async def on_message(message):
 
         count = invite_violations.get(message.author.id, 0) + 1
         invite_violations[message.author.id] = count
+        print(f"⚠ Invite-Verstoß #{count} von {message.author}")
 
         if count >= 3:
             try:
                 await message.author.timeout(duration=DELETE_TIMEOUT, reason="🔇 3x Invite-Verstoß")
-                user_timeouts[message.author.id] = discord.utils.utcnow().timestamp() + DELETE_TIMEOUT
+                user_timeouts[message.author.id] = now_ts + DELETE_TIMEOUT
                 print(f"⏱ {message.author} wurde für 1 Stunde getimeoutet.")
             except Exception as e:
                 print(f"❌ Fehler beim Timeout: {e}")
@@ -172,4 +185,4 @@ async def on_guild_channel_delete(channel):
             print(f"❌ Fehler beim Kick: {e}")
 
 
-bot.run(TOKEN)
+bot.run
