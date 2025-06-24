@@ -56,7 +56,7 @@ async def reset_rules_for_user(user, guild):
 @bot.event
 async def on_webhooks_update(channel):
     print(f"🔄 Webhook Update erkannt in {channel.name}")
-    await asyncio.sleep(3)  # Audit Logs brauchen etwas Zeit
+    await asyncio.sleep(3)
 
     try:
         webhooks = await channel.webhooks()
@@ -185,4 +185,66 @@ async def on_guild_channel_delete(channel):
             print(f"❌ Fehler beim Kick: {e}")
 
 
-bot.run
+@bot.event
+async def on_guild_role_create(role):
+    guild = role.guild
+    await asyncio.sleep(2)  # Warte, bis Audit Log aktualisiert ist
+
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_create):
+        if entry.target.id == role.id:
+            user = entry.user
+            break
+    else:
+        return
+
+    if is_whitelisted(user.id):
+        return
+
+    # Rolle löschen und Nutzer kicken
+    try:
+        await role.delete(reason="🔒 Rolle von unautorisiertem Nutzer erstellt")
+        print(f"❌ Rolle {role.name} gelöscht")
+    except Exception as e:
+        print(f"❌ Fehler beim Löschen der Rolle: {e}")
+
+    member = guild.get_member(user.id)
+    if member:
+        try:
+            await member.kick(reason="🧨 Rolle erstellt ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Rolle erstellt).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
+
+
+@bot.event
+async def on_guild_channel_create(channel):
+    guild = channel.guild
+    await asyncio.sleep(2)  # Warte, bis Audit Log aktualisiert ist
+
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
+        if entry.target.id == channel.id:
+            user = entry.user
+            break
+    else:
+        return
+
+    if is_whitelisted(user.id):
+        return
+
+    # Kanal löschen und Nutzer kicken
+    try:
+        await channel.delete(reason="🔒 Kanal von unautorisiertem Nutzer erstellt")
+        print(f"❌ Kanal {channel.name} gelöscht")
+    except Exception as e:
+        print(f"❌ Fehler beim Löschen des Kanals: {e}")
+
+    member = guild.get_member(user.id)
+    if member:
+        try:
+            await member.kick(reason="🧨 Kanal erstellt ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Kanal erstellt).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
+
+
+bot.run(TOKEN)
