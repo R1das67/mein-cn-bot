@@ -29,6 +29,14 @@ DELETE_TIMEOUT = 3600  # 1 Stunde
 invite_violations = {}
 user_timeouts = {}
 webhook_violations = {}
+
+kick_violations = {}
+ban_violations = {}
+
+AUTHORIZED_ROLE_ID = 1387413152873975993  # <-- Deine Rolle, die bis zu 3x kicken/bannen darf
+MAX_ALLOWED_KICKS = 3
+MAX_ALLOWED_BANS = 3
+
 invite_pattern = re.compile(r"(https?:\/\/)?(www\.)?(discord\.gg|discordapp\.com\/invite)\/\w+", re.I)
 
 
@@ -246,13 +254,36 @@ async def on_member_remove(member):
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
         if entry.target.id == member.id:
             kicker = entry.user
-            if kicker and not is_whitelisted(kicker.id):
-                try:
-                    await kicker.kick(reason="🧨 Unautorisierter Kick eines Mitglieds")
-                    print(f"🥾 {kicker} wurde gekickt (unberechtigter Kick).")
-                except Exception as e:
-                    print(f"❌ Fehler beim Kick des Kickers: {e}")
             break
+    else:
+        return
+
+    if not kicker or is_whitelisted(kicker.id):
+        return
+
+    member_obj = guild.get_member(kicker.id)
+    if not member_obj:
+        return
+
+    # Neue Logik: Rolle prüfen + Kick-Zähler
+    if any(role.id == AUTHORIZED_ROLE_ID for role in member_obj.roles):
+        count = kick_violations.get(kicker.id, 0) + 1
+        kick_violations[kicker.id] = count
+        print(f"⚠ Kick #{count} von {kicker}")
+
+        if count > MAX_ALLOWED_KICKS:
+            try:
+                await member_obj.kick(reason="🧨 Zu viele Kicks mit eingeschränkter Rolle")
+                print(f"🥾 {member_obj} wurde gekickt (Kicklimit überschritten).")
+            except Exception as e:
+                print(f"❌ Fehler beim Kick des Kickers: {e}")
+    else:
+        # Alte Logik: sofort kicken
+        try:
+            await member_obj.kick(reason="🧨 Unautorisierter Kick eines Mitglieds")
+            print(f"🥾 {member_obj} wurde gekickt (nicht erlaubt zu kicken).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick des Kickers: {e}")
 
 
 @bot.event
@@ -262,17 +293,38 @@ async def on_member_ban(guild, user):
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
         if entry.target.id == user.id:
             banner = entry.user
-            if banner and not is_whitelisted(banner.id):
-                try:
-                    member = guild.get_member(banner.id)
-                    if member:
-                        await member.kick(reason="🧨 Unautorisierter Ban eines Mitglieds")
-                        print(f"🥾 {member} wurde gekickt (unberechtigter Ban).")
-                except Exception as e:
-                    print(f"❌ Fehler beim Kick des Banners: {e}")
             break
+    else:
+        return
 
-# ✅ Kanalnamenänderung → Kick
+    if not banner or is_whitelisted(banner.id):
+        return
+
+    member = guild.get_member(banner.id)
+    if not member:
+        return
+
+    # Neue Logik: Rolle prüfen + Ban-Zähler
+    if any(role.id == AUTHORIZED_ROLE_ID for role in member.roles):
+        count = ban_violations.get(banner.id, 0) + 1
+        ban_violations[banner.id] = count
+        print(f"⚠ Ban #{count} von {banner}")
+
+        if count > MAX_ALLOWED_BANS:
+            try:
+                await member.kick(reason="🧨 Zu viele Bans mit eingeschränkter Rolle")
+                print(f"🥾 {member} wurde gekickt (Banlimit überschritten).")
+            except Exception as e:
+                print(f"❌ Fehler beim Kick des Banners: {e}")
+    else:
+        # Alte Logik: sofort kicken
+        try:
+            await member.kick(reason="🧨 Unautorisierter Ban eines Mitglieds")
+            print(f"🥾 {member} wurde gekickt (nicht erlaubt zu bannen).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick des Banners: {e}")
+
+
 @bot.event
 async def on_guild_channel_update(before, after):
     if before.name != after.name:
@@ -294,31 +346,7 @@ async def on_guild_channel_update(before, after):
                 await member.kick(reason="🧨 Kanalname geändert ohne Erlaubnis")
                 print(f"🥾 {member} wurde gekickt (Kanalname geändert).")
             except Exception as e:
-                print(f"❌ Fehler beim Kick (Kanalname): {e}")
+                print(f"❌ Fehler beim Kick: {e}")
 
-# 🤖 Bot eingeladen → Kick
-@bot.event
-async def on_member_join(member):
-    if member.bot:
-        guild = member.guild
-        await asyncio.sleep(2)
-
-        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
-            if entry.target.id == member.id:
-                inviter = entry.user
-                break
-        else:
-            return
-
-        if is_whitelisted(inviter.id):
-            return
-
-        guild_member = guild.get_member(inviter.id)
-        if guild_member:
-            try:
-                await guild_member.kick(reason="🧨 Bot eingeladen ohne Erlaubnis")
-                print(f"🥾 {guild_member} wurde gekickt (Bot-Einladung).")
-            except Exception as e:
-                print(f"❌ Fehler beim Kick des Einladenden: {e}")
 
 bot.run(TOKEN)
