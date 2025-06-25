@@ -22,7 +22,7 @@ WHITELIST = {
     843180408152784936, 662596869221908480,
     1159469934989025290, 830212609961754654,
     1206001825556471820, 557628352828014614,
-    491769129318088714, 651095740390834176
+    491769129318088714
 }
 
 DELETE_TIMEOUT = 3600  # 1 Stunde
@@ -238,7 +238,6 @@ async def on_guild_channel_create(channel):
             print(f"❌ Fehler beim Kick: {e}")
 
 
-# 🔐 Unautorisierte Kick- und Ban-Bestrafung
 @bot.event
 async def on_member_remove(member):
     await asyncio.sleep(2)
@@ -254,6 +253,7 @@ async def on_member_remove(member):
                 except Exception as e:
                     print(f"❌ Fehler beim Kick des Kickers: {e}")
             break
+
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -271,5 +271,54 @@ async def on_member_ban(guild, user):
                 except Exception as e:
                     print(f"❌ Fehler beim Kick des Banners: {e}")
             break
+
+# ✅ Kanalnamenänderung → Kick
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name != after.name:
+        guild = before.guild
+
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_update):
+            if entry.target.id == before.id:
+                user = entry.user
+                break
+        else:
+            return
+
+        if is_whitelisted(user.id):
+            return
+
+        member = guild.get_member(user.id)
+        if member:
+            try:
+                await member.kick(reason="🧨 Kanalname geändert ohne Erlaubnis")
+                print(f"🥾 {member} wurde gekickt (Kanalname geändert).")
+            except Exception as e:
+                print(f"❌ Fehler beim Kick (Kanalname): {e}")
+
+# 🤖 Bot eingeladen → Kick
+@bot.event
+async def on_member_join(member):
+    if member.bot:
+        guild = member.guild
+        await asyncio.sleep(2)
+
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
+            if entry.target.id == member.id:
+                inviter = entry.user
+                break
+        else:
+            return
+
+        if is_whitelisted(inviter.id):
+            return
+
+        guild_member = guild.get_member(inviter.id)
+        if guild_member:
+            try:
+                await guild_member.kick(reason="🧨 Bot eingeladen ohne Erlaubnis")
+                print(f"🥾 {guild_member} wurde gekickt (Bot-Einladung).")
+            except Exception as e:
+                print(f"❌ Fehler beim Kick des Einladenden: {e}")
 
 bot.run(TOKEN)
