@@ -4,7 +4,7 @@ from discord.ext import commands
 import re
 import asyncio
 import os
-from datetime import datetime, timezone  # timezone hier ergänzt
+from datetime import datetime, timezone
 
 keep_alive()
 
@@ -22,7 +22,7 @@ WHITELIST = {
     843180408152784936, 662596869221908480,
     1159469934989025290, 830212609961754654,
     1206001825556471820, 557628352828014614,
-    491769129318088714
+    491769129318088714, 651095740390834176
 }
 
 DELETE_TIMEOUT = 3600  # 1 Stunde
@@ -93,14 +93,11 @@ async def on_webhooks_update(channel):
 
 @bot.event
 async def on_message(message):
-    # WICHTIG: Entfernt den Block, der Nachrichten von fremden Bots gelöscht hat,
-    # damit andere Bots ihre Befehle und Nachrichten normal nutzen können.
-
     if is_whitelisted(message.author.id):
         await bot.process_commands(message)
         return
 
-    now_ts = datetime.now(timezone.utc).timestamp()  # hier aktualisiert
+    now_ts = datetime.now(timezone.utc).timestamp()
 
     if message.author.id in user_timeouts:
         if user_timeouts[message.author.id] > now_ts:
@@ -184,7 +181,7 @@ async def on_guild_channel_delete(channel):
 @bot.event
 async def on_guild_role_create(role):
     guild = role.guild
-    await asyncio.sleep(2)  # Warte, bis Audit Log aktualisiert ist
+    await asyncio.sleep(2)
 
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_create):
         if entry.target.id == role.id:
@@ -196,7 +193,6 @@ async def on_guild_role_create(role):
     if is_whitelisted(user.id):
         return
 
-    # Rolle löschen und Nutzer kicken
     try:
         await role.delete(reason="🔒 Rolle von unautorisiertem Nutzer erstellt")
         print(f"❌ Rolle {role.name} gelöscht")
@@ -215,7 +211,7 @@ async def on_guild_role_create(role):
 @bot.event
 async def on_guild_channel_create(channel):
     guild = channel.guild
-    await asyncio.sleep(2)  # Warte, bis Audit Log aktualisiert ist
+    await asyncio.sleep(2)
 
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
         if entry.target.id == channel.id:
@@ -227,7 +223,6 @@ async def on_guild_channel_create(channel):
     if is_whitelisted(user.id):
         return
 
-    # Kanal löschen und Nutzer kicken
     try:
         await channel.delete(reason="🔒 Kanal von unautorisiertem Nutzer erstellt")
         print(f"❌ Kanal {channel.name} gelöscht")
@@ -242,5 +237,39 @@ async def on_guild_channel_create(channel):
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
 
+
+# 🔐 Unautorisierte Kick- und Ban-Bestrafung
+@bot.event
+async def on_member_remove(member):
+    await asyncio.sleep(2)
+    guild = member.guild
+
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+        if entry.target.id == member.id:
+            kicker = entry.user
+            if kicker and not is_whitelisted(kicker.id):
+                try:
+                    await kicker.kick(reason="🧨 Unautorisierter Kick eines Mitglieds")
+                    print(f"🥾 {kicker} wurde gekickt (unberechtigter Kick).")
+                except Exception as e:
+                    print(f"❌ Fehler beim Kick des Kickers: {e}")
+            break
+
+@bot.event
+async def on_member_ban(guild, user):
+    await asyncio.sleep(2)
+
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
+        if entry.target.id == user.id:
+            banner = entry.user
+            if banner and not is_whitelisted(banner.id):
+                try:
+                    member = guild.get_member(banner.id)
+                    if member:
+                        await member.kick(reason="🧨 Unautorisierter Ban eines Mitglieds")
+                        print(f"🥾 {member} wurde gekickt (unberechtigter Ban).")
+                except Exception as e:
+                    print(f"❌ Fehler beim Kick des Banners: {e}")
+            break
 
 bot.run(TOKEN)
