@@ -37,7 +37,9 @@ AUTHORIZED_ROLE_ID = 1387413152873975993
 MAX_ALLOWED_KICKS = 3
 MAX_ALLOWED_BANS = 3
 
-invite_pattern = re.compile(r"(https?:\/\/)?(www\.)?(discord\.gg|discordapp\.com\/invite)\/\w+", re.I)
+invite_pattern = re.compile(
+    r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
+)
 
 
 @bot.event
