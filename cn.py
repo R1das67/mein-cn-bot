@@ -25,6 +25,12 @@ WHITELIST = {
     491769129318088714, 235148962103951360
 }
 
+# 🆕 Auto-Kick bei Join
+AUTO_KICK_IDS = {
+    1325204584829947914,
+    1169714843784335504,  # Ersetze mit echten IDs  
+}
+
 DELETE_TIMEOUT = 3600  # 1 Stunde
 invite_violations = {}
 user_timeouts = {}
@@ -41,15 +47,12 @@ invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
 )
 
-
 @bot.event
 async def on_ready():
     print(f'✅ {bot.user} ist online!')
 
-
 def is_whitelisted(user_id):
     return user_id in WHITELIST
-
 
 async def reset_rules_for_user(user, guild):
     member = guild.get_member(user.id)
@@ -62,7 +65,6 @@ async def reset_rules_for_user(user, guild):
             print(f"❌ Fehler bei Rollenentfernung: {e}")
     else:
         print(f"⚠ Mitglied {user} nicht gefunden.")
-
 
 @bot.event
 async def on_webhooks_update(channel):
@@ -99,7 +101,6 @@ async def on_webhooks_update(channel):
         print("❌ Fehler bei Webhook Handling:")
         import traceback
         traceback.print_exc()
-
 
 @bot.event
 async def on_message(message):
@@ -141,7 +142,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-
 @bot.event
 async def on_guild_role_delete(role):
     guild = role.guild
@@ -164,7 +164,6 @@ async def on_guild_role_delete(role):
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
 
-
 @bot.event
 async def on_guild_channel_delete(channel):
     guild = channel.guild
@@ -186,7 +185,6 @@ async def on_guild_channel_delete(channel):
             print(f"🥾 {member} wurde gekickt (Kanal gelöscht).")
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
-
 
 @bot.event
 async def on_guild_role_create(role):
@@ -217,7 +215,6 @@ async def on_guild_role_create(role):
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
 
-
 @bot.event
 async def on_guild_channel_create(channel):
     guild = channel.guild
@@ -246,7 +243,6 @@ async def on_guild_channel_create(channel):
             print(f"🥾 {member} wurde gekickt (Kanal erstellt).")
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
-
 
 @bot.event
 async def on_member_remove(member):
@@ -285,7 +281,6 @@ async def on_member_remove(member):
         except Exception as e:
             print(f"❌ Fehler beim Kick des Kickers: {e}")
 
-
 @bot.event
 async def on_member_ban(guild, user):
     await asyncio.sleep(2)
@@ -322,7 +317,6 @@ async def on_member_ban(guild, user):
         except Exception as e:
             print(f"❌ Fehler beim Kick des Banners: {e}")
 
-
 @bot.event
 async def on_guild_channel_update(before, after):
     if before.name != after.name:
@@ -346,10 +340,18 @@ async def on_guild_channel_update(before, after):
             except Exception as e:
                 print(f"❌ Fehler beim Kick: {e}")
 
-
-# 🔥 NEU: Bot-Invite Überwachung + Kicks
 @bot.event
 async def on_member_join(member: discord.Member):
+    # Auto-Kick nach User-ID
+    if member.id in AUTO_KICK_IDS:
+        try:
+            await member.kick(reason="🚫 Dieser Nutzer ist gesperrt (Auto-Kick bei Join)")
+            print(f"🥾 Auto-Kick: {member} wurde beim Beitritt entfernt.")
+        except Exception as e:
+            print(f"❌ Fehler beim Auto-Kick: {e}")
+        return
+
+    # Bot-Invite-Überwachung
     if member.bot:
         guild = member.guild
 
