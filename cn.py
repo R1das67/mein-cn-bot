@@ -21,12 +21,15 @@ intents.webhooks = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 tree = bot.tree
 
+# ------------------------
+# WHITELIST & SETTINGS
+# ------------------------
 WHITELIST = {
     843180408152784936, 662596869221908480,
     1159469934989025290, 830212609961754654,
     1206001825556471820, 557628352828014614,
     491769129318088714, 235148962103951360,
-    1308474671796326500
+    1308474671796326500, 1355616888624910396
 }
 
 AUTO_KICK_IDS = {
@@ -35,6 +38,7 @@ AUTO_KICK_IDS = {
 }
 
 DELETE_TIMEOUT = 3600
+
 invite_violations = {}
 user_timeouts = {}
 webhook_violations = {}
@@ -49,14 +53,11 @@ invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
 )
 
-@bot.event
-async def on_ready():
-    print(f'✅ {bot.user} ist online!')
-    try:
-        synced = await tree.sync()
-        print(f"🔃 {len(synced)} Slash-Commands synchronisiert.")
-    except Exception as e:
-        print("❌ Fehler beim Slash-Sync:", e)
+BACKUP_FILE = "server_backup.json"
+
+# ------------------------
+# HILFSFUNKTIONEN
+# ------------------------
 
 def is_whitelisted(user_id):
     return user_id in WHITELIST
@@ -70,8 +71,19 @@ async def reset_rules_for_user(user, guild):
             print(f"🔁 Rollen von {user} entfernt.")
         except Exception as e:
             print(f"❌ Fehler bei Rollenentfernung: {e}")
-    else:
-        print(f"⚠ Mitglied {user} nicht gefunden.")
+
+# ------------------------
+# EVENTS
+# ------------------------
+
+@bot.event
+async def on_ready():
+    print(f'✅ {bot.user} ist online!')
+    try:
+        synced = await tree.sync()
+        print(f"🔃 {len(synced)} Slash-Commands synchronisiert.")
+    except Exception as e:
+        print("❌ Fehler beim Slash-Sync:", e)
 
 @bot.event
 async def on_webhooks_update(channel):
@@ -177,7 +189,7 @@ async def on_guild_channel_delete(channel):
 @bot.event
 async def on_guild_role_create(role):
     guild = role.guild
-    await asyncio.sleep(2)
+    await asyncio.sleep(0)
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_create):
         if entry.target.id == role.id:
             user = entry.user
@@ -202,7 +214,7 @@ async def on_guild_role_create(role):
 @bot.event
 async def on_guild_channel_create(channel):
     guild = channel.guild
-    await asyncio.sleep(2)
+    await asyncio.sleep(0)
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
         if entry.target.id == channel.id:
             user = entry.user
@@ -226,7 +238,7 @@ async def on_guild_channel_create(channel):
 
 @bot.event
 async def on_member_remove(member):
-    await asyncio.sleep(2)
+    await asyncio.sleep(0)
     guild = member.guild
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
         if entry.target.id == member.id:
@@ -240,21 +252,16 @@ async def on_member_remove(member):
     if not member_obj:
         return
     if any(role.id == AUTHORIZED_ROLE_ID for role in member_obj.roles):
-        count = kick_violations.get(kicker.id, 0) + 1
-        kick_violations[kicker.id] = count
-        print(f"⚠ Kick #{count} von {kicker}")
-        if count > MAX_ALLOWED_KICKS:
-            try:
-                await member_obj.kick(reason="🧨 Zu viele Kicks mit eingeschränkter Rolle")
-                print(f"🥾 {member_obj} wurde gekickt (Kicklimit überschritten).")
-            except Exception as e:
-                print(f"❌ Fehler beim Kick des Kickers: {e}")
-    else:
+        return
+    count = kick_violations.get(kicker.id, 0) + 1
+    kick_violations[kicker.id] = count
+    print(f"⚠ Kick-Verstoß #{count} von {kicker}")
+    if count >= MAX_ALLOWED_KICKS:
         try:
-            await member_obj.kick(reason="🧨 Unautorisierter Kick eines Mitglieds")
-            print(f"🥾 {member_obj} wurde gekickt (nicht erlaubt zu kicken).")
+            await member_obj.kick(reason="🚫 Kick-Limit überschritten")
+            print(f"🥾 {member_obj} wurde wegen Kick-Limit gekickt.")
         except Exception as e:
-            print(f"❌ Fehler beim Kick des Kickers: {e}")
+            print(f"❌ Fehler beim Kick (Limit): {e}")
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -267,25 +274,20 @@ async def on_member_ban(guild, user):
         return
     if not banner or is_whitelisted(banner.id):
         return
-    member = guild.get_member(banner.id)
-    if not member:
+    member_obj = guild.get_member(banner.id)
+    if not member_obj:
         return
-    if any(role.id == AUTHORIZED_ROLE_ID for role in member.roles):
-        count = ban_violations.get(banner.id, 0) + 1
-        ban_violations[banner.id] = count
-        print(f"⚠ Ban #{count} von {banner}")
-        if count > MAX_ALLOWED_BANS:
-            try:
-                await member.kick(reason="🧨 Zu viele Bans mit eingeschränkter Rolle")
-                print(f"🥾 {member} wurde gekickt (Banlimit überschritten).")
-            except Exception as e:
-                print(f"❌ Fehler beim Kick des Banners: {e}")
-    else:
+    if any(role.id == AUTHORIZED_ROLE_ID for role in member_obj.roles):
+        return
+    count = ban_violations.get(banner.id, 0) + 1
+    ban_violations[banner.id] = count
+    print(f"⚠ Ban-Verstoß #{count} von {banner}")
+    if count >= MAX_ALLOWED_BANS:
         try:
-            await member.kick(reason="🧨 Unautorisierter Ban eines Mitglieds")
-            print(f"🥾 {member} wurde gekickt (nicht erlaubt zu bannen).")
+            await member_obj.kick(reason="🚫 Ban-Limit überschritten")
+            print(f"🥾 {member_obj} wurde wegen Ban-Limit gekickt.")
         except Exception as e:
-            print(f"❌ Fehler beim Kick des Banners: {e}")
+            print(f"❌ Fehler beim Kick (Ban-Limit): {e}")
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -308,78 +310,86 @@ async def on_member_join(member: discord.Member):
                     except Exception as e:
                         print(f"❌ Fehler beim Kicken des Bots: {e}")
                     try:
-                        await guild.kick(inviter, reason="🚫 Bot eingeladen ohne Erlaubnis")
-                        print(f"🥾 Einladender Nutzer {inviter} wurde gekickt.")
+                        inviter_member = guild.get_member(inviter.id)
+                        if inviter_member:
+                            await inviter_member.kick(reason="🚫 Bot eingeladen ohne Erlaubnis")
+                            print(f"🥾 Einladender Nutzer {inviter} wurde gekickt.")
                     except Exception as e:
-                        print(f"❌ Fehler beim Kicken des Einladers: {e}")
-                else:
-                    print(f"✅ Bot {member} wurde von {inviter} eingeladen (whitelisted).")
-                break
+                        print(f"❌ Fehler beim Kicken des Einladenden: {e}")
 
-# -----------------------------------
-# NEU: /backup & /reset server
-# -----------------------------------
+# ------------------------
+# SLASH-COMMANDS
+# ------------------------
 
-BACKUP_FILE = "server_backup.json"
-
-@tree.command(name="backup", description="🔒 Erstelle ein Backup der Kanalstruktur.")
-async def backup_server(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("🚫 Du hast keine Berechtigung.", ephemeral=True)
+@tree.command(name="backup", description="Erstellt eine JSON-Sicherung der Rollen und Kanäle.")
+async def backup(interaction: discord.Interaction):
+    if interaction.user.id not in WHITELIST:
+        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu nutzen.", ephemeral=True)
         return
     guild = interaction.guild
-    backup_data = []
-    for category in guild.categories:
-        cat_data = {
-            "type": "category",
-            "name": category.name,
-            "channels": []
+    data = {
+        "roles": [],
+        "channels": []
+    }
+    # Rollen sichern
+    for role in guild.roles:
+        data["roles"].append({
+            "id": role.id,
+            "name": role.name,
+            "color": role.color.value,
+            "hoist": role.hoist,
+            "mentionable": role.mentionable,
+            "permissions": role.permissions.value,
+            "position": role.position
+        })
+    # Kanäle sichern
+    for channel in guild.channels:
+        channel_data = {
+            "id": channel.id,
+            "name": channel.name,
+            "type": channel.type.name,
+            "position": channel.position,
+            "category_id": channel.category_id,
+            "nsfw": getattr(channel, "nsfw", False)
         }
-        for channel in category.channels:
-            if isinstance(channel, discord.TextChannel):
-                cat_data["channels"].append({
-                    "type": "text",
-                    "name": channel.name
-                })
-            elif isinstance(channel, discord.VoiceChannel):
-                cat_data["channels"].append({
-                    "type": "voice",
-                    "name": channel.name
-                })
-        backup_data.append(cat_data)
-    with open(BACKUP_FILE, "w", encoding="utf-8") as f:
-        json.dump(backup_data, f, indent=2, ensure_ascii=False)
-    await interaction.response.send_message("✅ Backup gespeichert.", ephemeral=True)
+        if isinstance(channel, discord.TextChannel):
+            channel_data["topic"] = channel.topic
+            channel_data["slowmode_delay"] = channel.slowmode_delay
+        elif isinstance(channel, discord.VoiceChannel):
+            channel_data["bitrate"] = channel.bitrate
+            channel_data["user_limit"] = channel.user_limit
+        data["channels"].append(channel_data)
 
-@tree.command(name="reset", description="🧨 Stelle die Serverstruktur wieder her.")
-@app_commands.describe(option="Tippe 'server' zur Bestätigung.")
-async def reset_server(interaction: discord.Interaction, option: str):
-    if option.lower() != "server":
-        await interaction.response.send_message("❌ Du musst `server` eingeben zur Bestätigung.", ephemeral=True)
-        return
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("🚫 Du hast keine Berechtigung.", ephemeral=True)
-        return
-    guild = interaction.guild
-    await interaction.response.send_message("⚠ Wiederherstellung gestartet...", ephemeral=True)
     try:
-        for channel in guild.channels:
-            try:
-                await channel.delete()
-            except Exception as e:
-                print(f"❌ Fehler beim Löschen von Kanal: {e}")
-        with open(BACKUP_FILE, "r", encoding="utf-8") as f:
-            backup_data = json.load(f)
-        for category_data in backup_data:
-            cat = await guild.create_category(name=category_data["name"])
-            for ch in category_data["channels"]:
-                if ch["type"] == "text":
-                    await guild.create_text_channel(name=ch["name"], category=cat)
-                elif ch["type"] == "voice":
-                    await guild.create_voice_channel(name=ch["name"], category=cat)
-        await interaction.followup.send("✅ Serverstruktur wiederhergestellt.", ephemeral=True)
+        with open(BACKUP_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        await interaction.response.send_message(f"✅ Backup wurde erstellt: `{BACKUP_FILE}`")
     except Exception as e:
-        await interaction.followup.send("❌ Fehler bei der Wiederherstellung.", ephemeral=True)
-        print("❌ Fehler beim Reset:", e)
+        await interaction.response.send_message(f"❌ Fehler beim Backup: {e}")
+
+@tree.command(name="reset", description="Setzt den Bot-Channel zurück (löscht eigene Kanäle).")
+async def reset(interaction: discord.Interaction):
+    if interaction.user.id not in WHITELIST:
+        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu nutzen.", ephemeral=True)
+        return
+    
+    guild = interaction.guild
+    await interaction.response.send_message("⏳ Setze Kanäle zurück...")
+
+    deleted_channels = 0
+    for channel in guild.channels:
+        # Beispiel: lösche Kanäle mit Namen, die mit "bot-" beginnen (kann angepasst werden)
+        if channel.name.startswith("bot-"):
+            try:
+                await channel.delete(reason="Reset durch /reset Befehl")
+                deleted_channels += 1
+            except Exception as e:
+                print(f"❌ Fehler beim Löschen Kanal {channel.name}: {e}")
+
+    await interaction.followup.send(f"✅ {deleted_channels} Kanäle wurden gelöscht.")
+
+# ------------------------
+# BOT START
+# ------------------------
 
 bot.run(TOKEN)
