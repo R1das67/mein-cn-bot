@@ -86,8 +86,7 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     # Anti Join-Bot Schutz:
-    # Beispiel: Direkt kicken, wenn Account jünger als 1 Tag oder ähnliches
-    account_age = (datetime.utcnow() - member.created_at).total_seconds()
+    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()  # Korrektur wegen Zeitzonen
     if account_age < 86400:  # 24 Stunden
         try:
             await member.kick(reason="Anti-Join-Bot: Neuer Account zu jung")
@@ -252,101 +251,37 @@ async def on_member_remove(member):
     guild = member.guild
     async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
         if entry.target.id == member.id:
-            kicker = entry.user
+            user = entry.user
+            if user and not is_whitelisted(user.id):
+                count = kick_violations.get(user.id, 0) + 1
+                kick_violations[user.id] = count
+                print(f"⚠ Kick-Verstoß #{count} von {user}")
+                if count >= MAX_ALLOWED_KICKS:
+                    try:
+                        await guild.ban(user, reason="⛔ Zu viele Kicks")
+                        ban_violations[user.id] = ban_violations.get(user.id, 0) + 1
+                        print(f"⛔ {user} wurde gebannt wegen zu vieler Kicks.")
+                    except Exception as e:
+                        print(f"❌ Fehler beim Bann: {e}")
             break
-    else:
-        return
-    if not kicker or is_whitelisted(kicker.id):
-        return
-    member_obj = guild.get_member(kicker.id)
-    if not member_obj:
-        return
-    if any(role.id == AUTHORIZED_ROLE_ID for role in member_obj.roles):
-        return
-    count = kick_violations.get(kicker.id, 0) + 1
-    kick_violations[kicker.id] = count
-    print(f"⚠ Kick-Verstoß #{count} von {kicker}")
-    if count >= MAX_ALLOWED_KICKS:
-        try:
-            await member_obj.kick(reason="🚫 Kick-Limit überschritten")
-            print(f"🥾 {member_obj} wurde wegen Kick-Limit gekickt.")
-        except Exception as e:
-            print(f"❌ Fehler beim Kick (Limit): {e}")
 
 @bot.event
 async def on_member_ban(guild, user):
-    await asyncio.sleep(2)
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.ban):
-        if entry.target.id == user.id:
-            banner = entry.user
-            break
-    else:
+    # Event für Bann
+    if is_whitelisted(user.id):
         return
-    if not banner or is_whitelisted(banner.id):
-        return
-    member_obj = guild.get_member(banner.id)
-    if not member_obj:
-        return
-    if any(role.id == AUTHORIZED_ROLE_ID for role in member_obj.roles):
-        return
-    count = ban_violations.get(banner.id, 0) + 1
-    ban_violations[banner.id] = count
-    print(f"⚠ Ban-Verstoß #{count} von {banner}")
+    count = ban_violations.get(user.id, 0) + 1
+    ban_violations[user.id] = count
     if count >= MAX_ALLOWED_BANS:
         try:
-            await member_obj.kick(reason="🚫 Ban-Limit überschritten")
-            print(f"🥾 {member_obj} wurde wegen Ban-Limit gekickt.")
+            # Hier kannst du weitere Aktionen definieren, z.B. Admin informieren
+            print(f"⛔ {user} hat die Max-Bannanzahl erreicht.")
         except Exception as e:
-            print(f"❌ Fehler beim Kick (Ban-Limit): {e}")
+            print(f"❌ Fehler beim Bann Event: {e}")
 
-# ------------------------
-# SLASH COMMANDS
-# ------------------------
-
-@tree.command(name="backup", description="Sichere alle Server-Kanäle und Kategorien.")
-async def backup(interaction: discord.Interaction):
-    if interaction.user.id not in WHITELIST:
-        await interaction.response.send_message("🚫 Keine Berechtigung.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    backup_data = {
-        "categories": [],
-        "channels": [],
-    }
-    for category in guild.categories:
-        backup_data["categories"].append({
-            "id": category.id,
-            "name": category.name,
-            "position": category.position,
-            "overwrites": {str(k.id): v.pair() for k,v in category.overwrites.items()}
-        })
-    for channel in guild.channels:
-        if isinstance(channel, discord.TextChannel):
-            backup_data["channels"].append({
-                "id": channel.id,
-                "name": channel.name,
-                "position": channel.position,
-                "category_id": channel.category.id if channel.category else None,
-                "topic": channel.topic,
-                "nsfw": channel.nsfw,
-                "slowmode_delay": channel.slowmode_delay,
-                "overwrites": {str(k.id): v.pair() for k,v in channel.overwrites.items()}
-            })
-        elif isinstance(channel, discord.VoiceChannel):
-            backup_data["channels"].append({
-                "id": channel.id,
-                "name": channel.name,
-                "position": channel.position,
-                "category_id": channel.category.id if channel.category else None,
-                "bitrate": channel.bitrate,
-                "user_limit": channel.user_limit,
-                "overwrites": {str(k.id): v.pair() for k,v in channel.overwrites.items()}
-            })
-    with open("server_backup.json", "w", encoding="utf-8") as f:
-        json.dump(backup_data, f, ensure_ascii=False, indent=4)
-    await interaction.followup.send(f"✅ Backup erfolgreich erstellt und in `server_backup.json` gespeichert.", ephemeral=True)
-
-# /reset und /backup_load komplett entfernt
+# Beispiel Slash Command
+@tree.command(name="ping", description="Pong!")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("Pong!")
 
 bot.run(TOKEN)
