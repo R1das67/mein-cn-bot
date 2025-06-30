@@ -294,102 +294,138 @@ async def on_member_join(member: discord.Member):
     if member.id in AUTO_KICK_IDS:
         try:
             await member.kick(reason="🚫 Dieser Nutzer ist gesperrt (Auto-Kick bei Join)")
-            print(f"🥾 Auto-Kick: {member} wurde beim Beitritt entfernt.")
+            print(f"🥾 Auto-Kick für {member} ausgeführt.")
         except Exception as e:
             print(f"❌ Fehler beim Auto-Kick: {e}")
-        return
-    if member.bot:
-        guild = member.guild
-        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
-            if entry.target.id == member.id:
-                inviter = entry.user
-                if not is_whitelisted(inviter.id):
-                    try:
-                        await member.kick(reason="🤖 Nicht autorisierter Bot")
-                        print(f"🥾 Bot {member} wurde gekickt.")
-                    except Exception as e:
-                        print(f"❌ Fehler beim Kicken des Bots: {e}")
-                    try:
-                        inviter_member = guild.get_member(inviter.id)
-                        if inviter_member:
-                            await inviter_member.kick(reason="🚫 Bot eingeladen ohne Erlaubnis")
-                            print(f"🥾 Einladender Nutzer {inviter} wurde gekickt.")
-                    except Exception as e:
-                        print(f"❌ Fehler beim Kicken des Einladenden: {e}")
 
 # ------------------------
-# SLASH-COMMANDS
+# BACKUP UND RESTORE
 # ------------------------
 
-@tree.command(name="backup", description="Erstellt eine JSON-Sicherung der Rollen und Kanäle.")
+@tree.command(name="backup", description="Erstellt ein Backup aller Kanäle")
 async def backup(interaction: discord.Interaction):
-    if interaction.user.id not in WHITELIST:
-        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu nutzen.", ephemeral=True)
+    if not is_whitelisted(interaction.user.id):
+        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu verwenden.", ephemeral=True)
         return
+    await interaction.response.send_message("⏳ Backup wird erstellt...")
     guild = interaction.guild
-    data = {
-        "roles": [],
-        "channels": []
-    }
-    # Rollen sichern
-    for role in guild.roles:
-        data["roles"].append({
-            "id": role.id,
-            "name": role.name,
-            "color": role.color.value,
-            "hoist": role.hoist,
-            "mentionable": role.mentionable,
-            "permissions": role.permissions.value,
-            "position": role.position
-        })
-    # Kanäle sichern
+    channels_data = []
     for channel in guild.channels:
-        channel_data = {
+        ch_type = None
+        if isinstance(channel, discord.TextChannel):
+            ch_type = "text"
+        elif isinstance(channel, discord.VoiceChannel):
+            ch_type = "voice"
+        elif isinstance(channel, discord.CategoryChannel):
+            ch_type = "category"
+        else:
+            ch_type = "other"
+        channel_info = {
             "id": channel.id,
             "name": channel.name,
-            "type": channel.type.name,
+            "type": ch_type,
             "position": channel.position,
-            "category_id": channel.category_id,
-            "nsfw": getattr(channel, "nsfw", False)
+            "category_id": channel.category.id if channel.category else None
         }
-        if isinstance(channel, discord.TextChannel):
-            channel_data["topic"] = channel.topic
-            channel_data["slowmode_delay"] = channel.slowmode_delay
-        elif isinstance(channel, discord.VoiceChannel):
-            channel_data["bitrate"] = channel.bitrate
-            channel_data["user_limit"] = channel.user_limit
-        data["channels"].append(channel_data)
+        if ch_type == "text":
+            channel_info.update({
+                "topic": channel.topic,
+                "nsfw": channel.nsfw,
+                "slowmode_delay": channel.slowmode_delay,
+                "rate_limit_per_user": channel.slowmode_delay
+            })
+        elif ch_type == "voice":
+            channel_info.update({
+                "bitrate": channel.bitrate,
+                "user_limit": channel.user_limit
+            })
+        channels_data.append(channel_info)
+    with open(BACKUP_FILE, "w", encoding="utf-8") as f:
+        json.dump({"channels": channels_data}, f, indent=4, ensure_ascii=False)
+    await interaction.followup.send(f"✅ Backup gespeichert in `{BACKUP_FILE}`.")
 
+async def restore_channels(guild, backup_file=BACKUP_FILE):
     try:
-        with open(BACKUP_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        await interaction.response.send_message(f"✅ Backup wurde erstellt: `{BACKUP_FILE}`")
+        with open(backup_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
     except Exception as e:
-        await interaction.response.send_message(f"❌ Fehler beim Backup: {e}")
+        print(f"❌ Backup-Datei konnte nicht geladen werden: {e}")
+        return 0
 
-@tree.command(name="reset", description="Setzt den Bot-Channel zurück (löscht eigene Kanäle).")
+    created_channels = 0
+    category_cache = {}
+
+    # Erst Kategorien anlegen, damit sie für andere Kanäle vorhanden sind
+    for ch_data in data.get("channels", []):
+        if ch_data["type"] == "category":
+            try:
+                cat = await guild.create_category(ch_data["name"], position=ch_data.get("position", 0), reason="Restore Backup Kategorie")
+                category_cache[ch_data["id"]] = cat
+                created_channels += 1
+            except Exception as e:
+                print(f"❌ Fehler beim Erstellen Kategorie {ch_data['name']}: {e}")
+
+    # Danach andere Kanäle anlegen
+    for ch_data in data.get("channels", []):
+        if ch_data["type"] == "text":
+            category = category_cache.get(ch_data.get("category_id"))
+            try:
+                await guild.create_text_channel(
+                    name=ch_data["name"],
+                    topic=ch_data.get("topic"),
+                    nsfw=ch_data.get("nsfw", False),
+                    slowmode_delay=ch_data.get("slowmode_delay", 0),
+                    position=ch_data.get("position", 0),
+                    category=category,
+                    reason="Restore Backup"
+                )
+                created_channels += 1
+            except Exception as e:
+                print(f"❌ Fehler beim Erstellen Text-Kanal {ch_data['name']}: {e}")
+        elif ch_data["type"] == "voice":
+            category = category_cache.get(ch_data.get("category_id"))
+            try:
+                await guild.create_voice_channel(
+                    name=ch_data["name"],
+                    bitrate=ch_data.get("bitrate", 64000),
+                    user_limit=ch_data.get("user_limit", 0),
+                    position=ch_data.get("position", 0),
+                    category=category,
+                    reason="Restore Backup"
+                )
+                created_channels += 1
+            except Exception as e:
+                print(f"❌ Fehler beim Erstellen Voice-Kanal {ch_data['name']}: {e}")
+
+    return created_channels
+
+@tree.command(name="reset", description="Setzt den Server zurück (löscht alle Kanäle und stellt sie wieder her).")
 async def reset(interaction: discord.Interaction):
-    if interaction.user.id not in WHITELIST:
+    if not is_whitelisted(interaction.user.id):
         await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu nutzen.", ephemeral=True)
         return
     
     guild = interaction.guild
-    await interaction.response.send_message("⏳ Setze Kanäle zurück...")
+    await interaction.response.send_message("⏳ Lösche alle Kanäle...")
 
     deleted_channels = 0
     for channel in guild.channels:
-        # Beispiel: lösche Kanäle mit Namen, die mit "bot-" beginnen (kann angepasst werden)
-        if channel.name.startswith("bot-"):
-            try:
-                await channel.delete(reason="Reset durch /reset Befehl")
-                deleted_channels += 1
-            except Exception as e:
-                print(f"❌ Fehler beim Löschen Kanal {channel.name}: {e}")
+        try:
+            await channel.delete(reason="Reset durch /reset Befehl")
+            deleted_channels += 1
+        except Exception as e:
+            print(f"❌ Fehler beim Löschen Kanal {channel.name}: {e}")
 
     await interaction.followup.send(f"✅ {deleted_channels} Kanäle wurden gelöscht.")
+    await asyncio.sleep(5)  # Kleine Pause, um sicherzugehen, dass alles gelöscht ist
+
+    await interaction.followup.send("⏳ Stelle Kanäle aus Backup wieder her...")
+
+    created_channels = await restore_channels(guild)
+    await interaction.followup.send(f"✅ {created_channels} Kanäle wurden wiederhergestellt.")
 
 # ------------------------
-# BOT START
+# BOT STARTEN
 # ------------------------
 
 bot.run(TOKEN)
