@@ -53,8 +53,6 @@ invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
 )
 
-BACKUP_FILE = "server_backup.json"
-
 # ------------------------
 # HILFSFUNKTIONEN
 # ------------------------
@@ -84,6 +82,18 @@ async def on_ready():
         print(f"🔃 {len(synced)} Slash-Commands synchronisiert.")
     except Exception as e:
         print("❌ Fehler beim Slash-Sync:", e)
+
+@bot.event
+async def on_member_join(member):
+    # Anti Join-Bot Schutz:
+    # Beispiel: Direkt kicken, wenn Account jünger als 1 Tag oder ähnliches
+    account_age = (datetime.utcnow() - member.created_at).total_seconds()
+    if account_age < 86400:  # 24 Stunden
+        try:
+            await member.kick(reason="Anti-Join-Bot: Neuer Account zu jung")
+            print(f"🥾 {member} wurde wegen jungem Account gekickt.")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick (Anti-Join-Bot): {e}")
 
 @bot.event
 async def on_webhooks_update(channel):
@@ -333,62 +343,10 @@ async def backup(interaction: discord.Interaction):
                 "user_limit": channel.user_limit,
                 "overwrites": {str(k.id): v.pair() for k,v in channel.overwrites.items()}
             })
-    with open(BACKUP_FILE, "w", encoding="utf-8") as f:
+    with open("server_backup.json", "w", encoding="utf-8") as f:
         json.dump(backup_data, f, ensure_ascii=False, indent=4)
-    await interaction.followup.send(f"✅ Backup erfolgreich erstellt und in `{BACKUP_FILE}` gespeichert.", ephemeral=True)
+    await interaction.followup.send(f"✅ Backup erfolgreich erstellt und in `server_backup.json` gespeichert.", ephemeral=True)
 
-@tree.command(name="backup_load", description="Lade das letzte Backup und erstelle Kanäle neu.")
-async def backup_load(interaction: discord.Interaction):
-    if interaction.user.id not in WHITELIST:
-        await interaction.response.send_message("🚫 Keine Berechtigung.", ephemeral=True)
-        return
-    if not os.path.exists(BACKUP_FILE):
-        await interaction.response.send_message("❌ Kein Backup gefunden.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    with open(BACKUP_FILE, "r", encoding="utf-8") as f:
-        backup_data = json.load(f)
-    # Kategorien erstellen
-    id_to_category = {}
-    for cat_data in sorted(backup_data["categories"], key=lambda x: x["position"]):
-        overwrites = {guild.get_role(int(k)): discord.PermissionOverwrite(*v) for k,v in cat_data["overwrites"].items()}
-        category = await guild.create_category(cat_data["name"], overwrites=overwrites)
-        id_to_category[cat_data["id"]] = category
-    # Kanäle erstellen
-    for ch_data in sorted(backup_data["channels"], key=lambda x: x["position"]):
-        overwrites = {guild.get_role(int(k)): discord.PermissionOverwrite(*v) for k,v in ch_data["overwrites"].items()}
-        category = id_to_category.get(ch_data["category_id"])
-        if "topic" in ch_data:
-            await guild.create_text_channel(
-                ch_data["name"], 
-                topic=ch_data.get("topic"),
-                nsfw=ch_data.get("nsfw", False),
-                slowmode_delay=ch_data.get("slowmode_delay", 0),
-                overwrites=overwrites,
-                category=category
-            )
-        else:
-            await guild.create_voice_channel(
-                ch_data["name"], 
-                bitrate=ch_data.get("bitrate", 64000),
-                user_limit=ch_data.get("user_limit", 0),
-                overwrites=overwrites,
-                category=category
-            )
-    await interaction.followup.send("✅ Backup geladen und Kanäle erstellt.", ephemeral=True)
-
-@tree.command(name="reset", description="Entferne alle Rollen des Users (nur whitelisted).")
-async def reset(interaction: discord.Interaction, member: discord.Member):
-    if interaction.user.id not in WHITELIST:
-        await interaction.response.send_message("🚫 Keine Berechtigung.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    try:
-        roles_to_remove = [role for role in member.roles if role.name != "@everyone"]
-        await member.remove_roles(*roles_to_remove, reason="Manuelles Reset durch Befehl")
-        await interaction.followup.send(f"✅ Rollen von {member.mention} wurden entfernt.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Fehler beim Entfernen der Rollen: {e}", ephemeral=True)
+# /reset und /backup_load komplett entfernt
 
 bot.run(TOKEN)
