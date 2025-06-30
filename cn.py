@@ -287,204 +287,165 @@ async def on_member_ban(guild, user):
             await member_obj.kick(reason="🚫 Ban-Limit überschritten")
             print(f"🥾 {member_obj} wurde wegen Ban-Limit gekickt.")
         except Exception as e:
-            print(f"❌ Fehler beim Kick (Ban-Limit): {e}")
+            print(f"❌ Fehler beim Kick (Limit): {e}")
 
 @bot.event
-async def on_member_join(member: discord.Member):
-    if member.id in AUTO_KICK_IDS:
-        try:
-            await member.kick(reason="🚫 Dieser Nutzer ist gesperrt (Auto-Kick bei Join)")
-            print(f"🥾 Auto-Kick: {member} wurde beim Beitritt entfernt.")
-        except Exception as e:
-            print(f"❌ Fehler beim Auto-Kick: {e}")
-        return
-    await asyncio.sleep(0)
-    if is_whitelisted(member.id):
-        return
+async def on_member_join(member):
     guild = member.guild
-    print(f"➕ Neuer Nutzer: {member}")
-    try:
-        # Default Rolle vergeben
-        role = discord.utils.get(guild.roles, id=1077726012875114098)
-        if role:
-            await member.add_roles(role, reason="👋 Standardrolle bei Join")
-        # Benutzername anpassen
-        new_name = f"{member.name} | 👾"
-        await member.edit(nick=new_name, reason="✏ Nick beim Join angepasst")
-    except Exception as e:
-        print(f"❌ Fehler bei Join-Aktionen: {e}")
+    # Standardrolle und Nickname-Zuweisung entfernt
+    if not is_whitelisted(member.id):
+        try:
+            # Beispiel: Warnung im Log
+            print(f"🔔 Neuer Nutzer {member} ist nicht auf der Whitelist.")
+        except Exception as e:
+            print(f"❌ Fehler beim on_member_join: {e}")
 
 # ------------------------
-# BACKUP UND RESET
+# SLASH COMMANDS
 # ------------------------
 
-@tree.command(name="backup", description="Sichere alle Server-Kanäle und Kategorien.")
-@commands.has_permissions(administrator=True)
-async def backup(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-    backup_data = {
-        "categories": [],
-        "text_channels": [],
-        "voice_channels": [],
-    }
-
-    # Kategorien sichern
-    for category in guild.categories:
-        backup_data["categories"].append({
-            "name": category.name,
-            "position": category.position,
-            "nsfw": category.nsfw,
-            "id": category.id,
-        })
-
-    # Text-Kanäle sichern
-    for text_channel in guild.text_channels:
-        backup_data["text_channels"].append({
-            "name": text_channel.name,
-            "topic": text_channel.topic,
-            "position": text_channel.position,
-            "category": text_channel.category.name if text_channel.category else None,
-            "nsfw": text_channel.nsfw,
-            "slowmode_delay": text_channel.slowmode_delay,
-            "permissions": [
-                (perm.target.id if hasattr(perm.target, "id") else perm.target.name, {
-                    "allow": perm.overwrites.pair()[0],
-                    "deny": perm.overwrites.pair()[1]
-                }) for perm in text_channel.overwrites.items()
-            ],
-            "id": text_channel.id,
-        })
-
-    # Voice-Kanäle sichern
-    for voice_channel in guild.voice_channels:
-        backup_data["voice_channels"].append({
-            "name": voice_channel.name,
-            "position": voice_channel.position,
-            "category": voice_channel.category.name if voice_channel.category else None,
-            "bitrate": voice_channel.bitrate,
-            "user_limit": voice_channel.user_limit,
-            "permissions": [
-                (perm.target.id if hasattr(perm.target, "id") else perm.target.name, {
-                    "allow": perm.overwrites.pair()[0],
-                    "deny": perm.overwrites.pair()[1]
-                }) for perm in voice_channel.overwrites.items()
-            ],
-            "id": voice_channel.id,
-        })
-
-    try:
-        with open(BACKUP_FILE, "w", encoding="utf-8") as f:
-            json.dump(backup_data, f, indent=4, ensure_ascii=False)
-        await interaction.followup.send("✅ Backup wurde erfolgreich erstellt!", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Backup fehlgeschlagen: {e}", ephemeral=True)
-
-
-@tree.command(name="reset", description="Löscht alle Kanäle und erstellt sie aus dem Backup neu.")
-@commands.has_permissions(administrator=True)
-async def reset(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    guild = interaction.guild
-
-    if not os.path.exists(BACKUP_FILE):
-        await interaction.followup.send("❌ Kein Backup gefunden. Bitte erstelle ein Backup.", ephemeral=True)
+@tree.command(name="kick", description="Kick einen User vom Server")
+@app_commands.describe(user="User der gekickt werden soll", reason="Grund für Kick")
+async def kick(interaction: discord.Interaction, user: discord.Member, reason: str = None):
+    if not any(role.id == AUTHORIZED_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message("🚫 Du hast keine Berechtigung.", ephemeral=True)
         return
+    if is_whitelisted(user.id):
+        await interaction.response.send_message("🚫 User ist whitelisted.", ephemeral=True)
+        return
+    try:
+        await user.kick(reason=reason)
+        await interaction.response.send_message(f"✅ {user} wurde gekickt.")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Fehler beim Kick: {e}", ephemeral=True)
 
+@tree.command(name="ban", description="Ban einen User vom Server")
+@app_commands.describe(user="User der gebannt werden soll", reason="Grund für Ban")
+async def ban(interaction: discord.Interaction, user: discord.Member, reason: str = None):
+    if not any(role.id == AUTHORIZED_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message("🚫 Du hast keine Berechtigung.", ephemeral=True)
+        return
+    if is_whitelisted(user.id):
+        await interaction.response.send_message("🚫 User ist whitelisted.", ephemeral=True)
+        return
+    try:
+        await user.ban(reason=reason)
+        await interaction.response.send_message(f"✅ {user} wurde gebannt.")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Fehler beim Ban: {e}", ephemeral=True)
+
+# ------------------------
+# SERVER BACKUP
+# ------------------------
+
+async def save_backup(guild):
+    data = {
+        "roles": [],
+        "channels": []
+    }
+    for role in guild.roles:
+        if role.is_default():
+            continue
+        data["roles"].append({
+            "name": role.name,
+            "permissions": role.permissions.value,
+            "color": role.color.value,
+            "hoist": role.hoist,
+            "mentionable": role.mentionable,
+            "position": role.position,
+            "managed": role.managed,
+        })
+    for channel in guild.channels:
+        data["channels"].append({
+            "name": channel.name,
+            "type": channel.type.name,
+            "position": channel.position,
+            "category": channel.category.name if channel.category else None,
+            "topic": getattr(channel, "topic", None),
+            "nsfw": getattr(channel, "nsfw", False),
+            "slowmode_delay": getattr(channel, "slowmode_delay", 0),
+            "bitrate": getattr(channel, "bitrate", None),
+            "user_limit": getattr(channel, "user_limit", None),
+        })
+    with open(BACKUP_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    print("💾 Server Backup gespeichert.")
+
+@tree.command(name="backup_save", description="Speichert ein Server-Backup")
+async def backup_save(interaction: discord.Interaction):
+    if not any(role.id == AUTHORIZED_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message("🚫 Keine Berechtigung.", ephemeral=True)
+        return
+    await save_backup(interaction.guild)
+    await interaction.response.send_message("✅ Backup gespeichert.")
+
+@tree.command(name="backup_load", description="Lädt ein Server-Backup")
+async def backup_load(interaction: discord.Interaction):
+    if not any(role.id == AUTHORIZED_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message("🚫 Keine Berechtigung.", ephemeral=True)
+        return
+    if not os.path.exists(BACKUP_FILE):
+        await interaction.response.send_message("❌ Kein Backup gefunden.", ephemeral=True)
+        return
     with open(BACKUP_FILE, "r", encoding="utf-8") as f:
-        backup_data = json.load(f)
+        data = json.load(f)
+    guild = interaction.guild
 
-    # Kanäle löschen parallel
-    delete_tasks = [channel.delete(reason="🔄 Server Reset") for channel in list(guild.channels)]
-    results = await asyncio.gather(*delete_tasks, return_exceptions=True)
-    for res in results:
-        if isinstance(res, Exception):
-            print(f"❌ Fehler beim Löschen eines Kanals: {res}")
+    # Rollen löschen (außer @everyone)
+    roles_to_delete = [role for role in guild.roles if not role.is_default()]
+    for role in roles_to_delete:
+        try:
+            await role.delete(reason="🔄 Backup Wiederherstellung - Alte Rolle löschen")
+        except Exception as e:
+            print(f"❌ Fehler beim Löschen der Rolle: {e}")
 
-    # Kategorien parallel erstellen
-    create_category_tasks = [
-        guild.create_category(
-            name=cat_data["name"],
-            position=cat_data["position"],
-            nsfw=cat_data.get("nsfw", False),
-            reason="🔄 Server Reset Backup"
-        )
-        for cat_data in sorted(backup_data.get("categories", []), key=lambda c: c["position"])
-    ]
-    created_categories = await asyncio.gather(*create_category_tasks, return_exceptions=True)
-
-    # Kategorie-Name -> Kategorie Objekt Mapping
-    categories_map = {}
-    for idx, cat_result in enumerate(created_categories):
-        if isinstance(cat_result, discord.CategoryChannel):
-            categories_map[backup_data["categories"][idx]["name"]] = cat_result
-        else:
-            print(f"❌ Fehler beim Erstellen der Kategorie: {cat_result}")
-
-    # Text-Kanäle parallel erstellen
-    create_text_tasks = []
-    for chan_data in backup_data.get("text_channels", []):
-        overwrites = {}
-        for target_id, perm in chan_data.get("permissions", []):
-            # Zielobjekt (Role/User) finden
-            target = guild.get_role(target_id) or guild.get_member(target_id) or None
-            if not target:
-                continue
-            allow = discord.Permissions(perm.get("allow", 0))
-            deny = discord.Permissions(perm.get("deny", 0))
-            overwrites[target] = discord.PermissionOverwrite.from_pair(allow.value, deny.value)
-
-        category = categories_map.get(chan_data.get("category"))
-        create_text_tasks.append(
-            guild.create_text_channel(
-                name=chan_data["name"],
-                topic=chan_data.get("topic"),
-                position=chan_data["position"],
-                category=category,
-                nsfw=chan_data.get("nsfw", False),
-                slowmode_delay=chan_data.get("slowmode_delay", 0),
-                overwrites=overwrites,
-                reason="🔄 Server Reset Backup"
+    # Rollen neu anlegen
+    for role_data in data["roles"]:
+        try:
+            await guild.create_role(
+                name=role_data["name"],
+                permissions=discord.Permissions(role_data["permissions"]),
+                color=discord.Color(role_data["color"]),
+                hoist=role_data["hoist"],
+                mentionable=role_data["mentionable"],
+                reason="🔄 Backup Wiederherstellung"
             )
-        )
-    text_results = await asyncio.gather(*create_text_tasks, return_exceptions=True)
-    for res in text_results:
-        if isinstance(res, Exception):
-            print(f"❌ Fehler beim Erstellen eines Text-Kanals: {res}")
+        except Exception as e:
+            print(f"❌ Fehler beim Erstellen der Rolle: {e}")
 
-    # Voice-Kanäle parallel erstellen
-    create_voice_tasks = []
-    for chan_data in backup_data.get("voice_channels", []):
-        overwrites = {}
-        for target_id, perm in chan_data.get("permissions", []):
-            target = guild.get_role(target_id) or guild.get_member(target_id) or None
-            if not target:
-                continue
-            allow = discord.Permissions(perm.get("allow", 0))
-            deny = discord.Permissions(perm.get("deny", 0))
-            overwrites[target] = discord.PermissionOverwrite.from_pair(allow.value, deny.value)
+    # Channels löschen
+    for channel in guild.channels:
+        try:
+            await channel.delete(reason="🔄 Backup Wiederherstellung - Alter Kanal löschen")
+        except Exception as e:
+            print(f"❌ Fehler beim Löschen des Kanals: {e}")
 
-        category = categories_map.get(chan_data.get("category"))
-        create_voice_tasks.append(
-            guild.create_voice_channel(
-                name=chan_data["name"],
-                position=chan_data["position"],
-                category=category,
-                bitrate=chan_data.get("bitrate", 64000),
-                user_limit=chan_data.get("user_limit", 0),
-                overwrites=overwrites,
-                reason="🔄 Server Reset Backup"
-            )
-        )
-    voice_results = await asyncio.gather(*create_voice_tasks, return_exceptions=True)
-    for res in voice_results:
-        if isinstance(res, Exception):
-            print(f"❌ Fehler beim Erstellen eines Voice-Kanals: {res}")
+    # Channels neu erstellen
+    for ch_data in data["channels"]:
+        try:
+            if ch_data["type"] == "text":
+                await guild.create_text_channel(
+                    name=ch_data["name"],
+                    topic=ch_data["topic"],
+                    nsfw=ch_data["nsfw"],
+                    slowmode_delay=ch_data["slowmode_delay"],
+                    reason="🔄 Backup Wiederherstellung"
+                )
+            elif ch_data["type"] == "voice":
+                await guild.create_voice_channel(
+                    name=ch_data["name"],
+                    bitrate=ch_data["bitrate"],
+                    user_limit=ch_data["user_limit"],
+                    reason="🔄 Backup Wiederherstellung"
+                )
+            elif ch_data["type"] == "category":
+                await guild.create_category_channel(
+                    name=ch_data["name"],
+                    reason="🔄 Backup Wiederherstellung"
+                )
+        except Exception as e:
+            print(f"❌ Fehler beim Erstellen des Kanals: {e}")
 
-    await interaction.followup.send("✅ Server Reset abgeschlossen!", ephemeral=True)
-
-# ------------------------
-# BOT STARTEN
-# ------------------------
+    await interaction.response.send_message("✅ Backup geladen.")
 
 bot.run(TOKEN)
