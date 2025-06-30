@@ -71,6 +71,153 @@ async def reset_rules_for_user(user, guild):
             print(f"❌ Fehler bei Rollenentfernung: {e}")
 
 # ------------------------
+# BACKUP / RESET SERVER
+# ------------------------
+
+# Temporäres Backup-Storage im RAM
+backup_data = {}
+
+def serialize_channel(channel: discord.abc.GuildChannel):
+    data = {
+        "name": channel.name,
+        "type": channel.type,  # discord.ChannelType
+        "position": channel.position,
+        "category_id": channel.category_id,
+    }
+    if isinstance(channel, discord.TextChannel):
+        data.update({
+            "topic": channel.topic,
+            "nsfw": channel.nsfw,
+            "slowmode_delay": channel.slowmode_delay,
+            "bitrate": None,
+            "user_limit": None,
+        })
+    elif isinstance(channel, discord.VoiceChannel):
+        data.update({
+            "bitrate": channel.bitrate,
+            "user_limit": channel.user_limit,
+            "topic": None,
+            "nsfw": None,
+            "slowmode_delay": None,
+        })
+    else:
+        data.update({
+            "topic": None,
+            "nsfw": None,
+            "slowmode_delay": None,
+            "bitrate": None,
+            "user_limit": None,
+        })
+    return data
+
+async def create_channel_from_backup(guild: discord.Guild, data):
+    category = guild.get_channel(data["category_id"]) if data["category_id"] else None
+
+    if data["type"] == discord.ChannelType.text:
+        return await guild.create_text_channel(
+            name=data["name"],
+            topic=data["topic"],
+            nsfw=data["nsfw"],
+            slowmode_delay=data["slowmode_delay"],
+            category=category,
+            position=data["position"]
+        )
+    elif data["type"] == discord.ChannelType.voice:
+        return await guild.create_voice_channel(
+            name=data["name"],
+            bitrate=data["bitrate"],
+            user_limit=data["user_limit"],
+            category=category,
+            position=data["position"]
+        )
+    elif data["type"] == discord.ChannelType.category:
+        return await guild.create_category(
+            name=data["name"],
+            position=data["position"]
+        )
+    else:
+        return None
+
+@tree.command(name="backup", description="Erstelle ein Backup aller Kanäle im Server.")
+async def backup(interaction: discord.Interaction):
+    guild = interaction.guild
+    if not guild:
+        await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
+        return
+
+    channels_data = []
+    channels_sorted = sorted(guild.channels, key=lambda c: c.position)
+
+    for ch in channels_sorted:
+        channels_data.append(serialize_channel(ch))
+
+    backup_data[guild.id] = channels_data
+    await interaction.response.send_message(f"✅ Backup für **{guild.name}** mit {len(channels_data)} Kanälen wurde gespeichert.")
+
+@tree.command(name="reset", description="Starte Reset-Aktion. Optionen: 'server'")
+@app_commands.describe(option="Option für Reset, z.B. 'server'")
+async def reset(interaction: discord.Interaction, option: str):
+    guild = interaction.guild
+    if not guild:
+        await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
+        return
+
+    if option.lower() != "server":
+        await interaction.response.send_message("❌ Unbekannte Option. Nur 'server' ist erlaubt.", ephemeral=True)
+        return
+
+    if guild.id not in backup_data:
+        await interaction.response.send_message("❌ Kein Backup für diesen Server gefunden. Bitte erst `/backup` ausführen.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⚠️ Starte Server Reset: Kanäle werden gelöscht und aus Backup wiederhergestellt...", ephemeral=True)
+
+    # Kanäle löschen
+    for ch in guild.channels:
+        try:
+            await ch.delete(reason="Reset Server durch Bot")
+        except Exception as e:
+            print(f"Fehler beim Löschen von Kanal {ch.name}: {e}")
+
+    await asyncio.sleep(5)  # Warten bis Löschungen durch sind
+
+    channels_backup = backup_data[guild.id]
+
+    # Kategorien zuerst erstellen
+    categories = [c for c in channels_backup if c["type"] == discord.ChannelType.category]
+    category_map = {}
+
+    for cat_data in categories:
+        cat = await create_channel_from_backup(guild, cat_data)
+        if cat:
+            category_map[cat_data["name"]] = cat
+
+    # Dann alle anderen Kanäle, Kategorie-ID auf neue IDs mappen
+    for ch_data in channels_backup:
+        if ch_data["type"] == discord.ChannelType.category:
+            continue
+
+        if ch_data["category_id"]:
+            # Kategorie aus Backup Name suchen und neue ID zuordnen
+            orig_cat = next((c for c in categories if c["category_id"] == ch_data["category_id"]), None)
+            # Alternativ per Name mappen:
+            cat_name = None
+            for cat in categories:
+                if cat["name"] == guild.get_channel(ch_data["category_id"]).name if guild.get_channel(ch_data["category_id"]) else None:
+                    cat_name = cat["name"]
+                    break
+            if cat_name in category_map:
+                ch_data["category_id"] = category_map[cat_name].id
+            else:
+                ch_data["category_id"] = None
+        else:
+            ch_data["category_id"] = None
+
+        await create_channel_from_backup(guild, ch_data)
+
+    await interaction.followup.send("✅ Server Reset abgeschlossen. Kanäle wurden wiederhergestellt.")
+
+# ------------------------
 # EVENTS
 # ------------------------
 
@@ -85,8 +232,7 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    # Anti Join-Bot Schutz:
-    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()  # Korrektur wegen Zeitzonen
+    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()  # Zeitzonen-Korrektur
     if account_age < 86400:  # 24 Stunden
         try:
             await member.kick(reason="Anti-Join-Bot: Neuer Account zu jung")
@@ -177,111 +323,8 @@ async def on_guild_role_delete(role):
             print(f"❌ Fehler beim Kick: {e}")
 
 @bot.event
-async def on_guild_channel_delete(channel):
-    guild = channel.guild
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
-        if entry.target.id == channel.id:
-            user = entry.user
-            break
-    else:
-        return
-    if not user or is_whitelisted(user.id):
-        return
-    member = guild.get_member(user.id)
-    if member:
-        try:
-            await member.kick(reason="🧨 Kanal gelöscht ohne Erlaubnis")
-            print(f"🥾 {member} wurde gekickt (Kanal gelöscht).")
-        except Exception as e:
-            print(f"❌ Fehler beim Kick: {e}")
-
-@bot.event
-async def on_guild_role_create(role):
-    guild = role.guild
-    await asyncio.sleep(0)
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.role_create):
-        if entry.target.id == role.id:
-            user = entry.user
-            break
-    else:
-        return
-    if is_whitelisted(user.id):
-        return
-    try:
-        await role.delete(reason="🔒 Rolle von unautorisiertem Nutzer erstellt")
-        print(f"❌ Rolle {role.name} gelöscht")
-    except Exception as e:
-        print(f"❌ Fehler beim Löschen der Rolle: {e}")
-    member = guild.get_member(user.id)
-    if member:
-        try:
-            await member.kick(reason="🧨 Rolle erstellt ohne Erlaubnis")
-            print(f"🥾 {member} wurde gekickt (Rolle erstellt).")
-        except Exception as e:
-            print(f"❌ Fehler beim Kick: {e}")
-
-@bot.event
-async def on_guild_channel_create(channel):
-    guild = channel.guild
-    await asyncio.sleep(0)
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
-        if entry.target.id == channel.id:
-            user = entry.user
-            break
-    else:
-        return
-    if is_whitelisted(user.id):
-        return
-    try:
-        await channel.delete(reason="🔒 Kanal von unautorisiertem Nutzer erstellt")
-        print(f"❌ Kanal {channel.name} gelöscht")
-    except Exception as e:
-        print(f"❌ Fehler beim Löschen des Kanals: {e}")
-    member = guild.get_member(user.id)
-    if member:
-        try:
-            await member.kick(reason="🧨 Kanal erstellt ohne Erlaubnis")
-            print(f"🥾 {member} wurde gekickt (Kanal erstellt).")
-        except Exception as e:
-            print(f"❌ Fehler beim Kick: {e}")
-
-@bot.event
 async def on_member_remove(member):
-    await asyncio.sleep(0)
-    guild = member.guild
-    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-        if entry.target.id == member.id:
-            user = entry.user
-            if user and not is_whitelisted(user.id):
-                count = kick_violations.get(user.id, 0) + 1
-                kick_violations[user.id] = count
-                print(f"⚠ Kick-Verstoß #{count} von {user}")
-                if count >= MAX_ALLOWED_KICKS:
-                    try:
-                        await guild.ban(user, reason="⛔ Zu viele Kicks")
-                        ban_violations[user.id] = ban_violations.get(user.id, 0) + 1
-                        print(f"⛔ {user} wurde gebannt wegen zu vieler Kicks.")
-                    except Exception as e:
-                        print(f"❌ Fehler beim Bann: {e}")
-            break
-
-@bot.event
-async def on_member_ban(guild, user):
-    # Event für Bann
-    if is_whitelisted(user.id):
-        return
-    count = ban_violations.get(user.id, 0) + 1
-    ban_violations[user.id] = count
-    if count >= MAX_ALLOWED_BANS:
-        try:
-            # Hier kannst du weitere Aktionen definieren, z.B. Admin informieren
-            print(f"⛔ {user} hat die Max-Bannanzahl erreicht.")
-        except Exception as e:
-            print(f"❌ Fehler beim Bann Event: {e}")
-
-# Beispiel Slash Command
-@tree.command(name="ping", description="Pong!")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("Pong!")
+    # Hier kann man Kick-/Ban-Logik reinbauen
+    pass
 
 bot.run(TOKEN)
