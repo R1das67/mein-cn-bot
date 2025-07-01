@@ -66,7 +66,7 @@ async def reset_rules_for_user(user, guild):
     if member:
         try:
             roles_to_remove = [r for r in member.roles if r.name != "@everyone"]
-            await member.remove_roles(*roles_to_remove, reason="Reset nach 2x Webhook-Verstoß")
+            await member.remove_roles(*roles_to_remove, reason="Reset nach 2x Webhook-Versto\u00df")
             print(f"🔁 Rollen von {user} entfernt.")
         except Exception as e:
             print(f"❌ Fehler bei Rollenentfernung: {e}")
@@ -75,7 +75,7 @@ async def reset_rules_for_user(user, guild):
 # BACKUP / RESET SERVER
 # ------------------------
 
-# Temporäres Backup-Storage im RAM
+# Tempor\u00e4res Backup-Storage im RAM
 backup_data = {}
 
 def serialize_channel(channel: discord.abc.GuildChannel):
@@ -139,7 +139,7 @@ async def create_channel_from_backup(guild: discord.Guild, data):
     else:
         return None
 
-@tree.command(name="backup", description="Erstelle ein Backup aller Kanäle im Server.")
+@tree.command(name="backup", description="Erstelle ein Backup aller Kan\u00e4le im Server.")
 async def backup(interaction: discord.Interaction):
     guild = interaction.guild
     if not guild:
@@ -153,10 +153,10 @@ async def backup(interaction: discord.Interaction):
         channels_data.append(serialize_channel(ch))
 
     backup_data[guild.id] = channels_data
-    await interaction.response.send_message(f"✅ Backup für **{guild.name}** mit {len(channels_data)} Kanälen wurde gespeichert.")
+    await interaction.response.send_message(f"✅ Backup f\u00fcr **{guild.name}** mit {len(channels_data)} Kan\u00e4len wurde gespeichert.")
 
 @tree.command(name="reset", description="Starte Reset-Aktion. Optionen: 'server'")
-@app_commands.describe(option="Option für Reset, z.B. 'server'")
+@app_commands.describe(option="Option f\u00fcr Reset, z.B. 'server'")
 async def reset(interaction: discord.Interaction, option: str):
     guild = interaction.guild
     if not guild:
@@ -168,19 +168,19 @@ async def reset(interaction: discord.Interaction, option: str):
         return
 
     if guild.id not in backup_data:
-        await interaction.response.send_message("❌ Kein Backup für diesen Server gefunden. Bitte erst `/backup` ausführen.", ephemeral=True)
+        await interaction.response.send_message("❌ Kein Backup f\u00fcr diesen Server gefunden. Bitte erst `/backup` ausf\u00fchren.", ephemeral=True)
         return
 
-    await interaction.response.send_message("⚠️ Starte Server Reset: Kanäle werden gelöscht und aus Backup wiederhergestellt...", ephemeral=True)
+    await interaction.response.send_message("⚠️ Starte Server Reset: Kan\u00e4le werden gel\u00f6scht und aus Backup wiederhergestellt...", ephemeral=True)
 
-    # Kanäle löschen
+    # Kan\u00e4le l\u00f6schen
     for ch in guild.channels:
         try:
             await ch.delete(reason="Reset Server durch Bot")
         except Exception as e:
-            print(f"Fehler beim Löschen von Kanal {ch.name}: {e}")
+            print(f"Fehler beim L\u00f6schen von Kanal {ch.name}: {e}")
 
-    await asyncio.sleep(5)  # Warten bis Löschungen durch sind
+    await asyncio.sleep(5)  # Warten bis L\u00f6schungen durch sind
 
     channels_backup = backup_data[guild.id]
 
@@ -193,15 +193,13 @@ async def reset(interaction: discord.Interaction, option: str):
         if cat:
             category_map[cat_data["name"]] = cat
 
-    # Dann alle anderen Kanäle, Kategorie-ID auf neue IDs mappen
+    # Dann alle anderen Kan\u00e4le, Kategorie-ID auf neue IDs mappen
     for ch_data in channels_backup:
         if ch_data["type"] == discord.ChannelType.category:
             continue
 
         if ch_data["category_id"]:
-            # Kategorie aus Backup Name suchen und neue ID zuordnen
             orig_cat = next((c for c in categories if c["category_id"] == ch_data["category_id"]), None)
-            # Alternativ per Name mappen:
             cat_name = None
             for cat in categories:
                 if cat["name"] == guild.get_channel(ch_data["category_id"]).name if guild.get_channel(ch_data["category_id"]) else None:
@@ -216,7 +214,7 @@ async def reset(interaction: discord.Interaction, option: str):
 
         await create_channel_from_backup(guild, ch_data)
 
-    await interaction.followup.send("✅ Server Reset abgeschlossen. Kanäle wurden wiederhergestellt.")
+    await interaction.followup.send("✅ Server Reset abgeschlossen. Kan\u00e4le wurden wiederhergestellt.")
 
 # ------------------------
 # EVENTS
@@ -233,8 +231,16 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()  # Zeitzonen-Korrektur
-    if account_age < 86400:  # 24 Stunden
+    if member.id in AUTO_KICK_IDS:
+        try:
+            await member.kick(reason="Auto-Kick: Gelistete ID")
+            print(f"🥾 {member} wurde automatisch gekickt (gelistete ID).")
+        except Exception as e:
+            print(f"❌ Fehler beim Auto-Kick: {e}")
+        return
+
+    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()
+    if account_age < 86400:
         try:
             await member.kick(reason="Anti-Join-Bot: Neuer Account zu jung")
             print(f"🥾 {member} wurde wegen jungem Account gekickt.")
@@ -258,11 +264,11 @@ async def on_webhooks_update(channel):
                     user = entry.user
                     break
             await webhook.delete(reason="🔒 Unautorisierter Webhook")
-            print(f"❌ Webhook {webhook.name} gelöscht")
+            print(f"❌ Webhook {webhook.name} gel\u00f6scht")
             if user and not is_whitelisted(user.id):
                 count = webhook_violations.get(user.id, 0) + 1
                 webhook_violations[user.id] = count
-                print(f"⚠ Webhook-Verstoß #{count} von {user}")
+                print(f"⚠ Webhook-Versto\u00df #{count} von {user}")
                 if count >= 2:
                     await reset_rules_for_user(user, channel.guild)
     except Exception as e:
@@ -280,7 +286,7 @@ async def on_message(message):
         if user_timeouts[message.author.id] > now_ts:
             try:
                 await message.delete()
-                print(f"🚫 Nachricht von getimtem User {message.author} gelöscht.")
+                print(f"🚫 Nachricht von getimtem User {message.author} gel\u00f6scht.")
             except:
                 pass
             return
@@ -289,17 +295,17 @@ async def on_message(message):
     if invite_pattern.search(message.content):
         try:
             await message.delete()
-            print(f"🚫 Invite-Link gelöscht von {message.author}")
+            print(f"🚫 Invite-Link gel\u00f6scht von {message.author}")
         except Exception as e:
-            print(f"❌ Fehler beim Invite-Löschen: {e}")
+            print(f"❌ Fehler beim Invite-L\u00f6schen: {e}")
         count = invite_violations.get(message.author.id, 0) + 1
         invite_violations[message.author.id] = count
-        print(f"⚠ Invite-Verstoß #{count} von {message.author}")
+        print(f"⚠ Invite-Versto\u00df #{count} von {message.author}")
         if count >= 3:
             try:
-                await message.author.timeout(duration=DELETE_TIMEOUT, reason="🔇 3x Invite-Verstoß")
+                await message.author.timeout(duration=DELETE_TIMEOUT, reason="🔇 3x Invite-Versto\u00df")
                 user_timeouts[message.author.id] = now_ts + DELETE_TIMEOUT
-                print(f"⏱ {message.author} wurde für 1 Stunde getimeoutet.")
+                print(f"⏱ {message.author} wurde f\u00fcr 1 Stunde getimeoutet.")
             except Exception as e:
                 print(f"❌ Fehler beim Timeout: {e}")
     await bot.process_commands(message)
@@ -318,8 +324,8 @@ async def on_guild_role_delete(role):
     member = guild.get_member(user.id)
     if member:
         try:
-            await member.kick(reason="🧨 Rolle gelöscht ohne Erlaubnis")
-            print(f"🥾 {member} wurde gekickt (Rolle gelöscht).")
+            await member.kick(reason="🧪 Rolle gel\u00f6scht ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Rolle gel\u00f6scht).")
         except Exception as e:
             print(f"❌ Fehler beim Kick: {e}")
 
