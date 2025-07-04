@@ -246,7 +246,7 @@ async def on_member_join(member):
 @bot.event
 async def on_webhooks_update(channel):
     print(f"🔄 Webhook Update erkannt in {channel.name}")
-    await asyncio.sleep(3)
+    await asyncio.sleep(0)
     try:
         webhooks = await channel.webhooks()
         for webhook in webhooks:
