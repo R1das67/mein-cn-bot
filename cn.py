@@ -7,6 +7,8 @@ import os
 import json
 from discord import app_commands
 from datetime import datetime, timezone
+from collections import defaultdict
+import time
 
 keep_alive()
 
@@ -49,6 +51,31 @@ MAX_ALLOWED_BANS = 3
 invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
 )
+
+# ------------------------
+# Timeout-Spam Tracking (5 Timeouts in 30 Sek -> Kick)
+# ------------------------
+
+timeout_actions = defaultdict(list)  # moderator_id : [timestamps]
+TIMEOUT_SPAM_LIMIT = 5
+TIME_WINDOW = 30  # Sekunden
+
+async def register_timeout_action(guild, moderator_id):
+    now = time.time()
+    actions = timeout_actions[moderator_id]
+    actions.append(now)
+    # Alte Aktionen entfernen, die außerhalb des Fensters sind
+    timeout_actions[moderator_id] = [t for t in actions if now - t <= TIME_WINDOW]
+
+    if len(timeout_actions[moderator_id]) >= TIMEOUT_SPAM_LIMIT:
+        member = guild.get_member(moderator_id)
+        if member:
+            try:
+                await member.kick(reason="Timeout-Spam (mehr als 5 Timeouts in 30 Sekunden)")
+                print(f"🥾 {member} wurde wegen Timeout-Spam gekickt.")
+                timeout_actions[moderator_id] = []  # Reset nach Kick
+            except Exception as e:
+                print(f"❌ Fehler beim Kick bei Timeout-Spam: {e}")
 
 # ------------------------
 # HILFSFUNKTIONEN
@@ -163,7 +190,7 @@ async def reset(interaction: discord.Interaction, option: str):
         return
 
     if guild.id not in backup_data:
-        await interaction.response.send_message("❌ Kein Backup für diesen Server gefunden. Bitte erst `/backup` ausführen.", ephemeral=True)
+        await interaction.response.send_message("❌ Kein Backup für diesen Server gefunden. Bitte erst /backup ausführen.", ephemeral=True)
         return
 
     await interaction.response.send_message("⚠️ Starte Server Reset: Kanäle werden gelöscht und aus Backup wiederhergestellt...", ephemeral=True)
@@ -219,6 +246,21 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
+    # Bot-Join-Schutz und Auto-Kick IDs (Kein Account-Alter-Check mehr)
+    if member.bot and not is_whitelisted(member.id):
+        async for entry in member.guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
+            if entry.target.id == member.id:
+                adder = entry.user
+                if adder and not is_whitelisted(adder.id):
+                    try:
+                        await adder.kick(reason="🛡️ Bot-Join-Schutz: Nutzer hat Bot hinzugefügt")
+                        await member.kick(reason="🛡️ Bot-Join-Schutz: Bot wurde entfernt")
+                        print(f"🥾 {adder} und Bot {member} wurden wegen Bot-Join-Schutz gekickt.")
+                    except Exception as e:
+                        print(f"❌ Fehler beim Kick (Bot-Join-Schutz): {e}")
+                break
+        return
+
     if member.id in AUTO_KICK_IDS:
         try:
             await member.kick(reason="Auto-Kick: Gelistete ID")
@@ -226,14 +268,6 @@ async def on_member_join(member):
         except Exception as e:
             print(f"❌ Fehler beim Auto-Kick: {e}")
         return
-
-    account_age = (datetime.now(timezone.utc) - member.created_at).total_seconds()
-    if account_age < 86400:
-        try:
-            await member.kick(reason="Anti-Join-Bot: Neuer Account zu jung")
-            print(f"🥾 {member} wurde wegen jungem Account gekickt.")
-        except Exception as e:
-            print(f"❌ Fehler beim Kick (Anti-Join-Bot): {e}")
 
 @bot.event
 async def on_webhooks_update(channel):
@@ -294,9 +328,17 @@ async def on_message(message):
                 await message.author.timeout(duration=DELETE_TIMEOUT, reason="🔇 3x Invite-Verstoß")
                 user_timeouts[message.author.id] = now_ts + DELETE_TIMEOUT
                 print(f"⏱ {message.author} wurde für 1 Stunde getimeoutet.")
+                
+                # Timeout-Spam Tracking
+                await register_timeout_action(message.guild, message.author.id)
+                
             except Exception as e:
                 print(f"❌ Fehler beim Timeout: {e}")
     await bot.process_commands(message)
+
+# ------------------------
+# Rollenlösch-, Kanallösch- & Kanal-Erstell-Schutz mit Kick (Ersetzt Nr.6)
+# ------------------------
 
 @bot.event
 async def on_guild_role_delete(role):
@@ -318,45 +360,65 @@ async def on_guild_role_delete(role):
             print(f"❌ Fehler beim Kick: {e}")
 
 @bot.event
-async def on_member_remove(member):
-    pass
-
-# ------------------------
-# TIMEOUT-ABUSE-SCHUTZ
-# ------------------------
-
-timeout_actions = {}  # {user_id: [timestamps]}
-TIMEOUT_WINDOW = 15  # Sekunden
-TIMEOUT_THRESHOLD = 5  # Timeouts
+async def on_guild_channel_delete(channel):
+    guild = channel.guild
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_delete):
+        if entry.target.id == channel.id:
+            user = entry.user
+            break
+    else:
+        return
+    if not user or is_whitelisted(user.id):
+        return
+    member = guild.get_member(user.id)
+    if member:
+        try:
+            await member.kick(reason="🧪 Kanal gelöscht ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Kanal gelöscht).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
 
 @bot.event
-async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
-    if entry.action != discord.AuditLogAction.member_update:
+async def on_guild_channel_create(channel):
+    guild = channel.guild
+    async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_create):
+        if entry.target.id == channel.id:
+            user = entry.user
+            break
+    else:
         return
-
-    if not entry.user or is_whitelisted(entry.user.id):
+    if not user or is_whitelisted(user.id):
         return
+    member = guild.get_member(user.id)
+    if member:
+        try:
+            await member.kick(reason="🧪 Kanal erstellt ohne Erlaubnis")
+            print(f"🥾 {member} wurde gekickt (Kanal erstellt).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick: {e}")
 
-    changes = entry.changes.after if hasattr(entry, "changes") else {}
-    if "communication_disabled_until" not in str(changes):
-        return
+# ------------------------
+# Kanalname-Änderung Kick
+# ------------------------
 
-    now = datetime.now(timezone.utc).timestamp()
-    user_id = entry.user.id
-
-    timestamps = timeout_actions.get(user_id, [])
-    timestamps = [t for t in timestamps if now - t <= TIMEOUT_WINDOW]
-    timestamps.append(now)
-    timeout_actions[user_id] = timestamps
-
-    if len(timestamps) >= TIMEOUT_THRESHOLD:
-        guild = entry.guild
-        member = guild.get_member(user_id)
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name != after.name:
+        guild = before.guild
+        async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.channel_update):
+            if entry.target.id == before.id and entry.created_at > datetime.utcnow() - timedelta(seconds=10):
+                user = entry.user
+                break
+        else:
+            return
+        if not user or is_whitelisted(user.id):
+            return
+        member = guild.get_member(user.id)
         if member:
             try:
-                await member.kick(reason="🛡️ Timeout-Spam: 5 Nutzer in 15 Sekunden")
-                print(f"🥾 {member} wurde wegen Timeout-Spam gekickt.")
+                await member.kick(reason="🧪 Kanalname ohne Erlaubnis geändert")
+                print(f"🥾 {member} wurde gekickt (Kanalname geändert).")
             except Exception as e:
-                print(f"❌ Fehler beim Kick wegen Timeout-Spam: {e}")
+                print(f"❌ Fehler beim Kick: {e}")
 
 bot.run(TOKEN)
