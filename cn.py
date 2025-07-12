@@ -268,6 +268,19 @@ async def on_member_join(member):
         except Exception as e:
             print(f"❌ Fehler beim Auto-Kick: {e}")
         return
+ 
+#HIER ist mein Account-Alter-Check
+   
+    account_age = datetime.utcnow() - member.created_at
+    min_age = timedelta(days=4)
+
+    if account_age < min_age:
+        try:
+            await member.kick(reason=f"Account zu jung: {account_age.days} Tage alt (Mindestalter: 4 Tage)")
+            print(f"🥾 {member} wurde gekickt wegen zu jungem Account ({account_age.days} Tage).")
+        except Exception as e:
+            print(f"❌ Fehler beim Kick wegen Account-Alter: {e}")
+        return
 
 @bot.event
 async def on_webhooks_update(channel):
