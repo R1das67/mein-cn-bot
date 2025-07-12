@@ -271,7 +271,7 @@ async def on_member_join(member):
  
 #HIER ist mein Account-Alter-Check
    
-    account_age = datetime.utcnow() - member.created_at
+    account_age = datetime.now(timezone.utc) - member.created_at
     min_age = timedelta(days=4)
 
     if account_age < min_age:
