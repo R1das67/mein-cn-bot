@@ -488,7 +488,7 @@ async def on_member_remove(member):
     guild = member.guild
     try:
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-            time_diff = (datetime.utcnow() - entry.created_at).total_seconds()
+            time_diff = (datetime.now(timezone.utc) - entry.created_at).total_seconds()
             if entry.target.id == member.id and time_diff < 10:
                 moderator = entry.user
                 if is_whitelisted(moderator.id):
