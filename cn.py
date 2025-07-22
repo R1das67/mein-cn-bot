@@ -43,7 +43,7 @@ webhook_violations = {}
 kick_violations = defaultdict(int)
 ban_violations = defaultdict(int)
 
-AUTHORIZED_ROLE_IDS = (1396487324665253888)
+AUTHORIZED_ROLE_IDS = ()
 MAX_ALLOWED_KICKS = 3
 MAX_ALLOWED_BANS = 3
 
