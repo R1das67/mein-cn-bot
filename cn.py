@@ -9,6 +9,7 @@ from discord import app_commands
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import time
+import reset_backup
 
 keep_alive()
 
