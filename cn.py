@@ -48,7 +48,6 @@ MAX_ALLOWED_KICKS = 3
 MAX_ALLOWED_BANS = 3
 ADMIN_COMMAND_WHITELIST = {
     843180408152784936,# <-- Ersetze mit echten User-IDs
-    1159469934989025290,
 }
 
 def is_admin_whitelisted(user_id):
