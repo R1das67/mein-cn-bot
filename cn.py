@@ -173,6 +173,7 @@ async def on_ready():
         print(f"🔃 {len(synced)} Slash-Commands synchronisiert.")
     except Exception as e:
         print("❌ Fehler beim Slash-Sync:", e)
+      
         await reset_backup.setup_backup_commands(tree)
 
 @bot.event
