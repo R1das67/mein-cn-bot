@@ -9,7 +9,6 @@ from discord import app_commands
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import time
-import reset_backup
 
 keep_alive()
 
@@ -173,8 +172,6 @@ async def on_ready():
         print(f"🔃 {len(synced)} Slash-Commands synchronisiert.")
     except Exception as e:
         print("❌ Fehler beim Slash-Sync:", e)
-      
-        await reset_backup.setup_backup_commands(tree)
 
 @bot.event
 async def on_member_join(member):
