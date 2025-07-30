@@ -160,6 +160,76 @@ async def create_channel_from_backup(guild: discord.Guild, data):
     else:
         return None
 
+@tree.command(name="backup", description="Erstelle ein Backup aller Kanäle im Server.")
+async def backup(interaction: discord.Interaction):
+    guild = interaction.guild
+    if not guild:
+        await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
+        return
+
+    channels_data = []
+    channels_sorted = sorted(guild.channels, key=lambda c: c.position)
+
+    for ch in channels_sorted:
+        channels_data.append(serialize_channel(ch))
+
+    backup_data[guild.id] = channels_data
+    await interaction.response.send_message(f"✅ Backup für **{guild.name}** mit {len(channels_data)} Kanälen wurde gespeichert.")
+
+@tree.command(name="reset", description="Starte Reset-Aktion. Optionen: 'server'")
+@app_commands.describe(option="Option für Reset, z.B. 'server'")
+async def reset(interaction: discord.Interaction, option: str):
+    guild = interaction.guild
+    if not guild:
+        await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
+        return
+
+    if option.lower() != "server":
+        await interaction.response.send_message("❌ Unbekannte Option. Nur 'server' ist erlaubt.", ephemeral=True)
+        return
+
+    if guild.id not in backup_data:
+        await interaction.response.send_message("❌ Kein Backup für diesen Server gefunden. Bitte erst /backup ausführen.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("⚠️ Starte Server Reset: Kanäle werden gelöscht und aus Backup wiederhergestellt...", ephemeral=True)
+
+    for ch in guild.channels:
+        try:
+            await ch.delete(reason="Reset Server durch Bot")
+        except Exception as e:
+            print(f"Fehler beim Löschen von Kanal {ch.name}: {e}")
+
+    await asyncio.sleep(3)
+
+    channels_backup = backup_data[guild.id]
+
+    categories = [c for c in channels_backup if c["type"] == discord.ChannelType.category]
+    category_map = {}
+
+    for cat_data in categories:
+        cat = await create_channel_from_backup(guild, cat_data)
+        if cat:
+            category_map[cat_data["name"]] = cat
+
+    for ch_data in channels_backup:
+        if ch_data["type"] == discord.ChannelType.category:
+            continue
+
+        if ch_data["category_id"]:
+            orig_cat = guild.get_channel(ch_data["category_id"])
+            cat_name = orig_cat.name if orig_cat else None
+            if cat_name in category_map:
+                ch_data["category_id"] = category_map[cat_name].id
+            else:
+                ch_data["category_id"] = None
+        else:
+            ch_data["category_id"] = None
+
+        await create_channel_from_backup(guild, ch_data)
+
+    await interaction.followup.send("✅ Server Reset abgeschlossen. Kanäle wurden wiederhergestellt.")
+
 # ------------------------
 # EVENTS
 # ------------------------
@@ -182,8 +252,8 @@ async def on_member_join(member):
                 adder = entry.user
                 if adder and not is_whitelisted(adder.id):
                     try:
-                        await adder.kick(reason="🛡️ Bot-Join-Schutz: Nutzer hat Bot hinzugefügt")
-                        await member.kick(reason="🛡️ Bot-Join-Schutz: Bot wurde entfernt")
+                        await adder.ban(reason="🛡️ Bot-Join-Schutz: Nutzer hat Bot hinzugefügt")
+                        await member.ban(reason="🛡️ Bot-Join-Schutz: Bot wurde entfernt")
                         print(f"🥾 {adder} und Bot {member} wurden wegen Bot-Join-Schutz gekickt.")
                     except Exception as e:
                         print(f"❌ Fehler beim Kick (Bot-Join-Schutz): {e}")
@@ -450,4 +520,4 @@ async def on_member_remove(member):
 # Bot starten
 # ------------------------
 
-bot.run(TOKEN) 
+bot.run(TOKEN)
