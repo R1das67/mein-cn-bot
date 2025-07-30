@@ -46,12 +46,6 @@ ban_violations = defaultdict(int)
 AUTHORIZED_ROLE_IDS = (1397807696639561759)
 MAX_ALLOWED_KICKS = 3
 MAX_ALLOWED_BANS = 3
-ADMIN_COMMAND_WHITELIST = {
-    843180408152784936,# <-- Ersetze mit echten User-IDs
-}
-
-def is_admin_whitelisted(user_id):
-    return user_id in ADMIN_COMMAND_WHITELIST
 
 invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
@@ -168,10 +162,6 @@ async def create_channel_from_backup(guild: discord.Guild, data):
 
 @tree.command(name="backup", description="Erstelle ein Backup aller Kanäle im Server.")
 async def backup(interaction: discord.Interaction):
-    if not is_admin_whitelisted(interaction.user.id):
-        await interaction.response.send_message("🚫 Du bist nicht berechtigt, dieses Kommando auszuführen.", ephemeral=True)
-        return
-
     guild = interaction.guild
     if not guild:
         await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
@@ -189,10 +179,6 @@ async def backup(interaction: discord.Interaction):
 @tree.command(name="reset", description="Starte Reset-Aktion. Optionen: 'server'")
 @app_commands.describe(option="Option für Reset, z.B. 'server'")
 async def reset(interaction: discord.Interaction, option: str):
-    if not is_admin_whitelisted(interaction.user.id):
-        await interaction.response.send_message("🚫 Du bist nicht berechtigt, dieses Kommando auszuführen.", ephemeral=True)
-        return
-
     guild = interaction.guild
     if not guild:
         await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
@@ -534,4 +520,4 @@ async def on_member_remove(member):
 # Bot starten
 # ------------------------
 
-bot.run(TOKEN)
+bot.run(TOKEN) 
