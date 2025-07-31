@@ -47,6 +47,14 @@ AUTHORIZED_ROLE_IDS = (1397807696639561759)
 MAX_ALLOWED_KICKS = 3
 MAX_ALLOWED_BANS = 3
 
+SETUP_BACKUP_WHITELIST = {
+    1159469934989025290,  # Beispielhafte User-IDs
+    843180408152784936,
+}
+
+def is_setup_whitelisted(user_id: int) -> bool:
+    return user_id in SETUP_BACKUP_WHITELIST
+
 invite_pattern = re.compile(
     r"(https?:\/\/)?(www\.)?(discord\.gg|discord(app)?\.com\/(invite|oauth2\/authorize))\/\w+|(?:discord(app)?\.com.*invite)", re.I
 )
@@ -162,6 +170,10 @@ async def create_channel_from_backup(guild: discord.Guild, data):
 
 @tree.command(name="backup", description="Erstelle ein Backup aller Kanäle im Server.")
 async def backup(interaction: discord.Interaction):
+    if not is_setup_whitelisted(interaction.user.id):
+        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu verwenden.", ephemeral=True)
+        return
+
     guild = interaction.guild
     if not guild:
         await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
@@ -179,6 +191,10 @@ async def backup(interaction: discord.Interaction):
 @tree.command(name="reset", description="Starte Reset-Aktion. Optionen: 'server'")
 @app_commands.describe(option="Option für Reset, z.B. 'server'")
 async def reset(interaction: discord.Interaction, option: str):
+    if not is_setup_whitelisted(interaction.user.id):
+        await interaction.response.send_message("❌ Du bist nicht berechtigt, diesen Befehl zu verwenden.", ephemeral=True)
+        return
+
     guild = interaction.guild
     if not guild:
         await interaction.response.send_message("❌ Kein Server gefunden.", ephemeral=True)
@@ -197,6 +213,7 @@ async def reset(interaction: discord.Interaction, option: str):
     for ch in guild.channels:
         try:
             await ch.delete(reason="Reset Server durch Bot")
+            await asyncio.sleep(0.6)
         except Exception as e:
             print(f"Fehler beim Löschen von Kanal {ch.name}: {e}")
 
@@ -227,7 +244,7 @@ async def reset(interaction: discord.Interaction, option: str):
             ch_data["category_id"] = None
 
         await create_channel_from_backup(guild, ch_data)
-
+        await asyncio.sleep(0.6)
     await interaction.followup.send("✅ Server Reset abgeschlossen. Kanäle wurden wiederhergestellt.")
 
 # ------------------------
