@@ -60,12 +60,12 @@ invite_pattern = re.compile(
 )
 
 # ------------------------
-# Timeout-Spam Tracking (5 Timeouts in 30 Sek -> Kick)
+# Timeout-Spam Tracking (5 Timeouts in 120 Sek -> Kick)
 # ------------------------
 
 timeout_actions = defaultdict(list)  # moderator_id : [timestamps]
 TIMEOUT_SPAM_LIMIT = 5
-TIME_WINDOW = 30  # Sekunden
+TIME_WINDOW = 120  # Sekunden
 
 async def register_timeout_action(guild, moderator_id):
     now = time.time()
@@ -78,7 +78,7 @@ async def register_timeout_action(guild, moderator_id):
         member = guild.get_member(moderator_id)
         if member:
             try:
-                await member.kick(reason="Timeout-Spam (mehr als 5 Timeouts in 30 Sekunden)")
+                await member.kick(reason="Timeout-Spam (mehr als 5 Timeouts in 120 Sekunden)")
                 print(f"🥾 {member} wurde wegen Timeout-Spam gekickt.")
                 timeout_actions[moderator_id] = []  # Reset nach Kick
             except Exception as e:
@@ -538,3 +538,4 @@ async def on_member_remove(member):
 # ------------------------
 
 bot.run(TOKEN)
+
