@@ -83,6 +83,19 @@ async def register_timeout_action(guild, moderator_id):
                 timeout_actions[moderator_id] = []  # Reset nach Kick
             except Exception as e:
                 print(f"❌ Fehler beim Kick bei Timeout-Spam: {e}")
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    # Prüfen ob sich der Timeout-Zustand geändert hat
+    if before.communication_disabled_until != after.communication_disabled_until:
+        # Wenn ein Timeout neu gesetzt wurde (nicht entfernt)
+        if after.communication_disabled_until is not None:
+            # Wer hat den Timeout vergeben? → Audit Log prüfen
+            async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_update):
+                if entry.target.id == after.id:
+                    moderator_id = entry.user.id
+                    if not is_whitelisted(moderator_id):
+                        await register_timeout_action(after.guild, moderator_id)
+                    break
 
 # ------------------------
 # HILFSFUNKTIONEN
@@ -357,10 +370,6 @@ async def on_message(message):
                 await message.author.timeout(duration=DELETE_TIMEOUT, reason="🔇 3x Invite-Verstoß")
                 user_timeouts[message.author.id] = now_ts + DELETE_TIMEOUT
                 print(f"⏱ {message.author} wurde für 1 Stunde getimeoutet.")
-                
-                # Timeout-Spam Tracking
-                await register_timeout_action(message.guild, message.author.id)
-                
             except Exception as e:
                 print(f"❌ Fehler beim Timeout: {e}")
     await bot.process_commands(message)
@@ -538,4 +547,5 @@ async def on_member_remove(member):
 # ------------------------
 
 bot.run(TOKEN)
+
 
