@@ -9,6 +9,8 @@ from discord import app_commands
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import time
+import discord
+print("Discord.py Version:", discord.__version__)
 
 keep_alive()
 
@@ -547,5 +549,6 @@ async def on_member_remove(member):
 # ------------------------
 
 bot.run(TOKEN)
+
 
 
