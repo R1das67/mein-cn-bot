@@ -87,17 +87,18 @@ async def register_timeout_action(guild, moderator_id):
                 print(f"❌ Fehler beim Kick bei Timeout-Spam: {e}")
 @bot.event
 async def on_member_update(before: discord.Member, after: discord.Member):
-    # Prüfen ob sich der Timeout-Zustand geändert hat
-    if before.communication_disabled_until != after.communication_disabled_until:
-        # Wenn ein Timeout neu gesetzt wurde (nicht entfernt)
-        if after.communication_disabled_until is not None:
-            # Wer hat den Timeout vergeben? → Audit Log prüfen
-            async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_update):
-                if entry.target.id == after.id:
-                    moderator_id = entry.user.id
-                    if not is_whitelisted(moderator_id):
-                        await register_timeout_action(after.guild, moderator_id)
-                    break
+    # Prüfen, ob 'communication_disabled_until' bei beiden Membern existiert
+    if hasattr(before, "communication_disabled_until") and hasattr(after, "communication_disabled_until"):
+        if before.communication_disabled_until != after.communication_disabled_until:
+            # Wenn ein Timeout neu gesetzt wurde (nicht entfernt)
+            if after.communication_disabled_until is not None:
+                # Wer hat den Timeout vergeben? → Audit Log prüfen
+                async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_update):
+                    if entry.target.id == after.id:
+                        moderator_id = entry.user.id
+                        if not is_whitelisted(moderator_id):
+                            await register_timeout_action(after.guild, moderator_id)
+                        break
 
 # ------------------------
 # HILFSFUNKTIONEN
@@ -549,6 +550,7 @@ async def on_member_remove(member):
 # ------------------------
 
 bot.run(TOKEN)
+
 
 
 
